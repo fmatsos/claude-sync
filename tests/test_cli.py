@@ -28,7 +28,7 @@ def test_version():
     assert "claude-sync" in result.output
 
 
-def test_status_lists_projects_and_mapping(env, not_running):
+def test_status_lists_projects_and_mapping(env, not_busy):
     local, remote, _ = env
     make_session(local, "work/webshop")
     result = runner.invoke(app, ["status"])
@@ -37,7 +37,7 @@ def test_status_lists_projects_and_mapping(env, not_running):
     assert encode_path(f"{remote}/work/webshop") in result.output
 
 
-def test_status_flags_outside_home_projects(env, not_running):
+def test_status_flags_outside_home_projects(env, not_busy):
     local, _, _ = env
     make_session(local, "work/webshop")
     d = local / ".claude" / "projects" / "-mnt-c-Users-tasos-proj"
@@ -61,7 +61,7 @@ def test_status_without_config(homes, monkeypatch, tmp_path):
 
 
 @requires_rsync
-def test_push_dry_run(env, not_running):
+def test_push_dry_run(env, not_busy):
     local, remote, _ = env
     make_session(local, "work/webshop")
     result = runner.invoke(app, ["push", "--dry-run"])
@@ -71,7 +71,7 @@ def test_push_dry_run(env, not_running):
 
 
 @requires_rsync
-def test_push_verbose_lists_skipped_files(env, not_running):
+def test_push_verbose_lists_skipped_files(env, not_busy):
     import os
 
     local, remote, _ = env
@@ -90,7 +90,7 @@ def test_push_verbose_lists_skipped_files(env, not_running):
 
 
 @requires_rsync
-def test_push_then_pull(env, not_running):
+def test_push_then_pull(env, not_busy):
     local, remote, _ = env
     make_session(local, "work/webshop")
     result = runner.invoke(app, ["push"])
@@ -108,7 +108,7 @@ def test_push_then_pull(env, not_running):
 
 
 @requires_rsync
-def test_push_single_project_cli(env, not_running):
+def test_push_single_project_cli(env, not_busy):
     local, remote, _ = env
     make_session(local, "work/webshop")
     make_session(local, "work/blog")
@@ -120,7 +120,7 @@ def test_push_single_project_cli(env, not_running):
 
 
 @requires_rsync
-def test_push_unknown_project_cli(env, not_running):
+def test_push_unknown_project_cli(env, not_busy):
     local, _, _ = env
     make_session(local, "work/webshop")
     result = runner.invoke(app, ["push", f"{local}/work/nope"])
@@ -129,7 +129,7 @@ def test_push_unknown_project_cli(env, not_running):
 
 
 @requires_rsync
-def test_diff_single_project_cli(env, not_running):
+def test_diff_single_project_cli(env, not_busy):
     local, remote, _ = env
     make_session(local, "work/webshop")
     make_session(local, "work/blog")
@@ -139,19 +139,29 @@ def test_diff_single_project_cli(env, not_running):
     assert encode_path(f"{remote}/work/blog") not in result.output
 
 
-def test_push_refuses_while_running(env, monkeypatch):
+def test_push_reports_busy_session_and_force_includes_it(env):
     local, _, _ = env
     make_session(local, "work/webshop")
-    from claude_sync import sync
-
-    monkeypatch.setattr(sync, "claude_running", lambda: True)
     result = runner.invoke(app, ["push"])
-    assert result.exit_code == 1
+    assert result.exit_code == 0, result.output
+    assert "left out" in result.output
     assert "--force" in result.output
+    result = runner.invoke(app, ["push", "--force"])
+    assert result.exit_code == 0, result.output
+    assert "left out" not in result.output
 
 
 @requires_rsync
-def test_diff_shows_both_directions(env, not_running):
+def test_push_full_flag_overwrites_and_diff_flag_is_accepted(env, not_busy):
+    local, _, _ = env
+    make_session(local, "work/webshop")
+    assert runner.invoke(app, ["push", "--diff"]).exit_code == 0
+    assert runner.invoke(app, ["push", "--full"]).exit_code == 0
+    assert runner.invoke(app, ["pull", "--full", "--dry-run"]).exit_code == 0
+
+
+@requires_rsync
+def test_diff_shows_both_directions(env, not_busy):
     local, remote, _ = env
     make_session(local, "work/webshop")
     result = runner.invoke(app, ["diff"])
@@ -167,7 +177,7 @@ def test_diff_shows_both_directions(env, not_running):
     assert result.output.count("already in sync") == 2
 
 
-def test_doctor_healthy(env, not_running, monkeypatch, tmp_path):
+def test_doctor_healthy(env, not_busy, monkeypatch, tmp_path):
     import tempfile
 
     local, remote, _ = env
@@ -221,7 +231,7 @@ def mac_env(homes, monkeypatch, tmp_path):
     return local, mac_home
 
 
-def test_push_multiple_remotes_requires_name(multi_env, not_running):
+def test_push_multiple_remotes_requires_name(multi_env, not_busy):
     local, *_ = multi_env
     make_session(local, "work/webshop")
     result = runner.invoke(app, ["push"])
@@ -230,7 +240,7 @@ def test_push_multiple_remotes_requires_name(multi_env, not_running):
 
 
 @requires_rsync
-def test_push_explicit_remote_name(multi_env, not_running):
+def test_push_explicit_remote_name(multi_env, not_busy):
     local, mac_home, pad_home, _ = multi_env
     make_session(local, "work/webshop")
     result = runner.invoke(app, ["push", "mac"])
@@ -239,7 +249,7 @@ def test_push_explicit_remote_name(multi_env, not_running):
     assert not (pad_home / ".claude").exists()
 
 
-def test_push_remote_typo_is_hard_error(mac_env, not_running):
+def test_push_remote_typo_is_hard_error(mac_env, not_busy):
     local, mac_home = mac_env
     make_session(local, "work/webshop")
     result = runner.invoke(app, ["push", "mca"])
@@ -251,7 +261,7 @@ def test_push_remote_typo_is_hard_error(mac_env, not_running):
 
 
 @requires_rsync
-def test_push_remote_name_shadowing_directory_notice(multi_env, not_running, monkeypatch):
+def test_push_remote_name_shadowing_directory_notice(multi_env, not_busy, monkeypatch):
     local, mac_home, _, _ = multi_env
     make_session(local, "work/webshop")
     shadow = local / "cwd-play"
@@ -265,7 +275,7 @@ def test_push_remote_name_shadowing_directory_notice(multi_env, not_running, mon
 
 
 @requires_rsync
-def test_push_all_syncs_every_remote(multi_env, not_running):
+def test_push_all_syncs_every_remote(multi_env, not_busy):
     local, mac_home, pad_home, _ = multi_env
     make_session(local, "work/webshop")
     result = runner.invoke(app, ["push", "--all"])
@@ -278,7 +288,7 @@ def test_push_all_syncs_every_remote(multi_env, not_running):
 
 
 @requires_rsync
-def test_push_all_continues_past_failure(multi_env, not_running, tmp_path):
+def test_push_all_continues_past_failure(multi_env, not_busy, tmp_path):
     local, mac_home, _, cfg_path = multi_env
     make_session(local, "work/webshop")
     blockfile = tmp_path / "blockfile"
@@ -297,7 +307,7 @@ def test_push_all_continues_past_failure(multi_env, not_running, tmp_path):
     assert (mac_home / ".claude" / "projects").is_dir()
 
 
-def test_push_remote_and_all_conflict(multi_env, not_running):
+def test_push_remote_and_all_conflict(multi_env, not_busy):
     local, *_ = multi_env
     make_session(local, "work/webshop")
     result = runner.invoke(app, ["push", "mac", "--all"])
@@ -306,7 +316,7 @@ def test_push_remote_and_all_conflict(multi_env, not_running):
 
 
 @requires_rsync
-def test_pull_all_merges_from_every_remote(multi_env, not_running):
+def test_pull_all_merges_from_every_remote(multi_env, not_busy):
     local, mac_home, pad_home, _ = multi_env
     make_session(mac_home, "work/frommac")
     make_session(pad_home, "work/frompad")
@@ -317,7 +327,7 @@ def test_pull_all_merges_from_every_remote(multi_env, not_running):
         assert session_cwd(out) == f"{local}/{rel}"
 
 
-def test_status_with_remote_argument(multi_env, not_running):
+def test_status_with_remote_argument(multi_env, not_busy):
     local, _, pad_home, _ = multi_env
     make_session(local, "work/webshop")
     result = runner.invoke(app, ["status", "pad"])
@@ -329,7 +339,7 @@ def test_status_with_remote_argument(multi_env, not_running):
     assert "Multiple remotes" in result.output
 
 
-def test_doctor_all_and_single_remote(multi_env, not_running, monkeypatch, tmp_path):
+def test_doctor_all_and_single_remote(multi_env, not_busy, monkeypatch, tmp_path):
     import tempfile
 
     local, *_ = multi_env
@@ -354,7 +364,7 @@ def test_doctor_all_and_single_remote(multi_env, not_running, monkeypatch, tmp_p
 
 
 @requires_rsync
-def test_encoded_selector_via_double_dash(multi_env, not_running):
+def test_encoded_selector_via_double_dash(multi_env, not_busy):
     local, mac_home, _, _ = multi_env
     make_session(local, "work/webshop")
     make_session(local, "work/blog")

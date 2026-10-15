@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from claude_sync.transport import (
@@ -127,3 +129,17 @@ def test_rsync_failure_raises(tmp_path):
     t = Transport(host="", remote_home=str(tmp_path))
     with pytest.raises(TransportError, match="rsync failed"):
         t.rsync(f"{tmp_path}/does-not-exist/", f"{tmp_path}/dst/")
+
+
+def test_recent_files_lists_only_recently_written_sessions(tmp_path):
+    from claude_sync.transport import recent_files
+
+    (tmp_path / "proj").mkdir()
+    fresh, stale = tmp_path / "proj" / "a.jsonl", tmp_path / "proj" / "b.jsonl"
+    fresh.write_text("x")
+    stale.write_text("x")
+    os.utime(stale, (1_000, 1_000))
+    (tmp_path / "proj" / "c.txt").write_text("x")
+    assert recent_files(tmp_path, 120) == ["proj/a.jsonl"]
+    assert recent_files(tmp_path, 0) == []
+    assert recent_files(tmp_path / "missing", 120) == []

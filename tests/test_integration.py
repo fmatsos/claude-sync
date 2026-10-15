@@ -20,7 +20,7 @@ def remote_project(remote_home, rel):
     return remote_home / ".claude" / "projects" / encode_path(f"{remote_home}/{rel}")
 
 
-def test_push_creates_remapped_remote(homes, not_running):
+def test_push_creates_remapped_remote(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     report = sync.push(local_cfg(remote), local_home=local)
@@ -31,7 +31,7 @@ def test_push_creates_remapped_remote(homes, not_running):
     assert not report.dry_run
 
 
-def test_push_dry_run_writes_nothing(homes, not_running):
+def test_push_dry_run_writes_nothing(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     report = sync.push(local_cfg(remote), local_home=local, dry_run=True)
@@ -40,7 +40,7 @@ def test_push_dry_run_writes_nothing(homes, not_running):
     assert not (remote / ".claude").exists()
 
 
-def test_push_merge_newer_remote_file_wins(homes, not_running):
+def test_push_merge_newer_remote_file_wins(homes, not_busy):
     local, remote = homes
     f = make_session(local, "work/webshop")
     os.utime(f, (OLD, OLD))
@@ -55,7 +55,7 @@ def test_push_merge_newer_remote_file_wins(homes, not_running):
     assert report.total_files == 0
 
 
-def test_push_merge_older_remote_file_updated(homes, not_running):
+def test_push_merge_older_remote_file_updated(homes, not_busy):
     local, remote = homes
     f = make_session(local, "work/webshop")
     os.utime(f, (NEW, NEW))
@@ -70,7 +70,7 @@ def test_push_merge_older_remote_file_updated(homes, not_running):
     assert report.summary[encode_path(f"{remote}/work/webshop")].updated == 1
 
 
-def test_push_never_deletes_on_target(homes, not_running):
+def test_push_never_deletes_on_target(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     target = remote_project(remote, "work/webshop")
@@ -82,7 +82,7 @@ def test_push_never_deletes_on_target(homes, not_running):
     assert remote_only.exists()
 
 
-def test_push_applies_specific_mapping(homes, not_running):
+def test_push_applies_specific_mapping(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     mappings = {f"{local}/work/webshop": f"{remote}/projects/webshop"}
@@ -92,24 +92,118 @@ def test_push_applies_specific_mapping(homes, not_running):
     assert session_cwd(out) == f"{remote}/projects/webshop"
 
 
-def test_push_refuses_while_claude_running(homes, monkeypatch):
+def test_push_leaves_busy_session_out_and_reports_it(homes):
+    local, remote = homes
+    make_session(local, "work/webshop")  # just written: counts as active
+    old = make_session(local, "work/webshop", name="old.jsonl")
+    os.utime(old, (OLD, OLD))
+    report = sync.push(local_cfg(remote), local_home=local)
+    target = remote_project(remote, "work/webshop")
+    assert (target / "old.jsonl").exists()
+    assert not (target / "s1.jsonl").exists()
+    assert [p.rsplit("/", 1)[1] for p in report.busy] == ["s1.jsonl"]
+
+
+def test_push_include_busy_sends_active_session(homes):
     local, remote = homes
     make_session(local, "work/webshop")
-    monkeypatch.setattr(sync, "claude_running", lambda: True)
-    with pytest.raises(sync.SyncError, match="running"):
-        sync.push(local_cfg(remote), local_home=local)
-    # override flag works
-    sync.push(local_cfg(remote), local_home=local, force=True)
+    report = sync.push(local_cfg(remote), local_home=local, include_busy=True)
     assert (remote_project(remote, "work/webshop") / "s1.jsonl").exists()
+    assert report.busy == []
 
 
-def test_push_without_local_sessions(homes, not_running):
+def test_push_leaves_session_busy_on_the_remote_alone(homes):
+    local, remote = homes
+    f = make_session(local, "work/webshop")
+    os.utime(f, (OLD, OLD))
+    target = remote_project(remote, "work/webshop")
+    target.mkdir(parents=True)
+    (target / "s1.jsonl").write_text("being written on the remote\n", encoding="utf-8")
+    report = sync.push(local_cfg(remote), local_home=local, full=True)
+    assert (target / "s1.jsonl").read_text(encoding="utf-8") == "being written on the remote\n"
+    assert len(report.busy) == 1
+
+
+def test_idle_busy_file_that_needs_no_transfer_is_not_reported(homes):
+    local, remote = homes
+    make_session(local, "work/webshop")
+    sync.push(local_cfg(remote), local_home=local, include_busy=True)
+    report = sync.push(local_cfg(remote), local_home=local)  # now identical on both sides
+    assert report.busy == []
+
+
+def _both_sides(homes, local_age, remote_age):
+    local, remote = homes
+    f = make_session(local, "work/webshop")
+    os.utime(f, (local_age, local_age))
+    target = remote_project(remote, "work/webshop")
+    target.mkdir(parents=True)
+    g = target / "s1.jsonl"
+    g.write_text("remote version\n", encoding="utf-8")
+    os.utime(g, (remote_age, remote_age))
+    return f, g
+
+
+def test_diff_keeps_a_newer_destination_file(homes, not_busy):
+    local, remote = homes
+    _, g = _both_sides(homes, OLD, NEW)
+    sync.push(local_cfg(remote), local_home=local)
+    assert g.read_text(encoding="utf-8") == "remote version\n"
+
+
+def test_full_overwrites_a_newer_destination_and_backs_it_up(homes, not_busy):
+    local, remote = homes
+    _, g = _both_sides(homes, OLD, NEW)
+    report = sync.push(local_cfg(remote), local_home=local, full=True)
+    assert "remote version" not in g.read_text(encoding="utf-8")
+    assert report.backup_dir is not None
+    saved = list((remote / ".claude" / "sync-backup").rglob("s1.jsonl"))
+    assert [s.read_text(encoding="utf-8") for s in saved] == ["remote version\n"]
+
+
+def test_full_never_deletes_destination_only_files(homes, not_busy):
+    local, remote = homes
+    make_session(local, "work/webshop")
+    target = remote_project(remote, "work/webshop")
+    target.mkdir(parents=True)
+    keep = target / "only-on-remote.jsonl"
+    keep.write_text("keep me\n", encoding="utf-8")
+    sync.push(local_cfg(remote), local_home=local, full=True)
+    assert keep.read_text(encoding="utf-8") == "keep me\n"
+
+
+def test_full_dry_run_writes_nothing(homes, not_busy):
+    local, remote = homes
+    _, g = _both_sides(homes, OLD, NEW)
+    report = sync.push(local_cfg(remote), local_home=local, full=True, dry_run=True)
+    assert g.read_text(encoding="utf-8") == "remote version\n"
+    assert report.backup_dir is None
+    assert not (remote / ".claude" / "sync-backup").exists()
+
+
+def test_pull_full_overwrites_local_and_backs_up_locally(homes, not_busy):
+    local, remote = homes
+    f = make_session(local, "work/webshop")
+    os.utime(f, (NEW, NEW))
+    target = remote_project(remote, "work/webshop")
+    target.mkdir(parents=True)
+    (target / "s1.jsonl").write_text(
+        f'{{"cwd": "{remote}/work/webshop", "from": "remote"}}\n', encoding="utf-8"
+    )
+    os.utime(target / "s1.jsonl", (OLD, OLD))
+    report = sync.pull(local_cfg(remote), local_home=local, full=True)
+    assert '"from": "remote"' in f.read_text(encoding="utf-8")
+    assert report.backup_dir is not None
+    assert list((local / ".claude" / "sync-backup").rglob("s1.jsonl"))
+
+
+def test_push_without_local_sessions(homes, not_busy):
     local, remote = homes
     with pytest.raises(sync.SyncError, match="no local sessions"):
         sync.push(local_cfg(remote), local_home=local)
 
 
-def test_pull_remaps_remote_sessions(homes, not_running):
+def test_pull_remaps_remote_sessions(homes, not_busy):
     local, remote = homes
     make_session(remote, "work/webshop")  # remote-style session, paths under remote home
     report = sync.pull(local_cfg(remote), local_home=local)
@@ -119,13 +213,13 @@ def test_pull_remaps_remote_sessions(homes, not_running):
     assert report.total_files == 1
 
 
-def test_pull_without_remote_sessions(homes, not_running):
+def test_pull_without_remote_sessions(homes, not_busy):
     local, remote = homes
     with pytest.raises(sync.SyncError, match="no sessions on the remote"):
         sync.pull(local_cfg(remote), local_home=local)
 
 
-def test_pull_first_time_offers_backup(homes, not_running):
+def test_pull_first_time_offers_backup(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     make_session(remote, "work/beta")
@@ -149,7 +243,7 @@ def test_pull_first_time_offers_backup(homes, not_running):
     assert report2.backup is None
 
 
-def test_pull_backup_declined(homes, not_running):
+def test_pull_backup_declined(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     make_session(remote, "work/beta")
@@ -158,7 +252,7 @@ def test_pull_backup_declined(homes, not_running):
     assert not (local / ".claude" / "backups").exists()
 
 
-def test_pull_into_empty_local_no_backup_offer(homes, not_running):
+def test_pull_into_empty_local_no_backup_offer(homes, not_busy):
     local, remote = homes
     make_session(remote, "work/beta")
     asked = []
@@ -166,7 +260,7 @@ def test_pull_into_empty_local_no_backup_offer(homes, not_running):
     assert asked == []
 
 
-def test_pull_dry_run_writes_nothing(homes, not_running):
+def test_pull_dry_run_writes_nothing(homes, not_busy):
     local, remote = homes
     make_session(remote, "work/beta")
     report = sync.pull(local_cfg(remote), local_home=local, dry_run=True)
@@ -176,7 +270,7 @@ def test_pull_dry_run_writes_nothing(homes, not_running):
     assert not (local / ".claude" / sync._PULL_MARKER).exists()
 
 
-def test_push_includes_history_when_enabled(homes, not_running):
+def test_push_includes_history_when_enabled(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     history = local / ".claude" / "history.jsonl"
@@ -192,7 +286,7 @@ def test_push_includes_history_when_enabled(homes, not_running):
     assert "history.jsonl" in report.summary
 
 
-def test_push_skips_history_by_default(homes, not_running):
+def test_push_skips_history_by_default(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     (local / ".claude" / "history.jsonl").write_text("{}\n", encoding="utf-8")
@@ -200,7 +294,7 @@ def test_push_skips_history_by_default(homes, not_running):
     assert not (remote / ".claude" / "history.jsonl").exists()
 
 
-def test_push_and_pull_agents_verbatim(homes, not_running):
+def test_push_and_pull_agents_verbatim(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     agents = local / ".claude" / "agents"
@@ -221,7 +315,7 @@ def test_push_and_pull_agents_verbatim(homes, not_running):
     assert (agents / "reviewer.md").read_text(encoding="utf-8") == "review\n"
 
 
-def test_pull_history_remapped(homes, not_running):
+def test_pull_history_remapped(homes, not_busy):
     local, remote = homes
     make_session(remote, "work/webshop")
     (remote / ".claude" / "history.jsonl").write_text(
@@ -235,7 +329,7 @@ def test_pull_history_remapped(homes, not_running):
     assert str(remote) not in local_history.read_text(encoding="utf-8")
 
 
-def test_resumed_session_update_lands_on_second_pull(homes, not_running):
+def test_resumed_session_update_lands_on_second_pull(homes, not_busy):
     """The field scenario: pull, resume on the remote (newer mtime + new
     content), pull again — the update must land, with its mtime intact."""
     local, remote = homes
@@ -261,7 +355,7 @@ def test_resumed_session_update_lands_on_second_pull(homes, not_running):
     assert abs(local_file.stat().st_mtime - NEW) < 1
 
 
-def test_verbose_reports_exact_skipped_newer_set(homes, not_running):
+def test_verbose_reports_exact_skipped_newer_set(homes, not_busy):
     """--verbose must list exactly the files -u skipped, no more, no less."""
     local, remote = homes
     for name in ("kept.jsonl", "updated.jsonl", "created.jsonl"):
@@ -285,7 +379,7 @@ def test_verbose_reports_exact_skipped_newer_set(homes, not_running):
     assert "remote is older" not in older.read_text(encoding="utf-8")  # replaced
 
 
-def test_verbose_off_reports_nothing_skipped(homes, not_running):
+def test_verbose_off_reports_nothing_skipped(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     report = sync.push(local_cfg(remote), local_home=local)
@@ -300,7 +394,7 @@ def outside_project(home, cwd, name=None):
     return d
 
 
-def test_push_refuses_outside_home_with_snippet(homes, not_running):
+def test_push_refuses_outside_home_with_snippet(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     outside_project(local, "/mnt/c/Users/tasos/proj-a")
@@ -316,7 +410,7 @@ def test_push_refuses_outside_home_with_snippet(homes, not_running):
     assert not (remote / ".claude").exists()  # nothing transferred
 
 
-def test_push_refusal_reports_undetermined_and_ambiguous(homes, not_running):
+def test_push_refusal_reports_undetermined_and_ambiguous(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     empty = local / ".claude" / "projects" / "-opt-nothing"
@@ -331,14 +425,14 @@ def test_push_refusal_reports_undetermined_and_ambiguous(homes, not_running):
     assert "[remotes.default.mappings]" not in message
 
 
-def test_push_outside_home_force_overrides(homes, not_running):
+def test_push_outside_home_force_overrides(homes, not_busy):
     local, remote = homes
     outside_project(local, "/mnt/c/Users/tasos/proj")
     sync.push(local_cfg(remote), local_home=local, force=True)
     assert (remote / ".claude" / "projects" / "-mnt-c-Users-tasos-proj").is_dir()
 
 
-def test_push_with_covering_mapping_is_not_refused(homes, not_running):
+def test_push_with_covering_mapping_is_not_refused(homes, not_busy):
     local, remote = homes
     outside_project(local, "/mnt/c/Users/tasos/proj")
     mappings = {"/mnt/c/Users/tasos": f"{remote}/tasos"}
@@ -347,7 +441,7 @@ def test_push_with_covering_mapping_is_not_refused(homes, not_running):
     assert session_cwd(out) == f"{remote}/tasos/proj"
 
 
-def test_pull_refuses_outside_home_on_remote(homes, not_running):
+def test_pull_refuses_outside_home_on_remote(homes, not_busy):
     local, remote = homes
     outside_project(remote, "/mnt/c/Users/tasos/proj")
     with pytest.raises(sync.SyncError) as err:
@@ -358,7 +452,7 @@ def test_pull_refuses_outside_home_on_remote(homes, not_running):
     assert f'"{local}/proj" = "/mnt/c/Users/tasos/proj"' in message
 
 
-def test_push_git_advisory_reports_dirty_repo(homes, not_running, tmp_path):
+def test_push_git_advisory_reports_dirty_repo(homes, not_busy, tmp_path):
     import shutil as _shutil
     import subprocess as _subprocess
 
@@ -384,7 +478,7 @@ def test_push_git_advisory_reports_dirty_repo(homes, not_running, tmp_path):
     assert quiet.git == []
 
 
-def test_full_round_trip_merge(homes, not_running):
+def test_full_round_trip_merge(homes, not_busy):
     """Push from A, add a session on B, pull on A: both sides converge."""
     local, remote = homes
     make_session(local, "work/webshop")

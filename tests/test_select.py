@@ -51,7 +51,7 @@ def test_resolve_skips_empty():
 
 
 @requires_rsync
-def test_push_single_project(homes, not_running):
+def test_push_single_project(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     make_session(local, "work/blog")
@@ -63,7 +63,7 @@ def test_push_single_project(homes, not_running):
 
 
 @requires_rsync
-def test_push_multiple_projects_by_encoded_name(homes, not_running):
+def test_push_multiple_projects_by_encoded_name(homes, not_busy):
     local, remote = homes
     for rel in ("work/webshop", "work/blog", "work/docs"):
         make_session(local, rel)
@@ -76,7 +76,7 @@ def test_push_multiple_projects_by_encoded_name(homes, not_running):
 
 
 @requires_rsync
-def test_push_unknown_project_suggests_closest(homes, not_running):
+def test_push_unknown_project_suggests_closest(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     with pytest.raises(sync.SyncError, match="did you mean"):
@@ -84,7 +84,7 @@ def test_push_unknown_project_suggests_closest(homes, not_running):
 
 
 @requires_rsync
-def test_push_selection_skips_extras(homes, not_running):
+def test_push_selection_skips_extras(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     (local / ".claude" / "history.jsonl").write_text("{}\n", encoding="utf-8")
@@ -98,7 +98,7 @@ def test_push_selection_skips_extras(homes, not_running):
 
 
 @requires_rsync
-def test_push_selection_with_mapping(homes, not_running):
+def test_push_selection_with_mapping(homes, not_busy):
     local, remote = homes
     make_session(local, "work/webshop")
     mappings = {f"{local}/work/webshop": f"{remote}/projects/webshop"}
@@ -111,7 +111,7 @@ def test_push_selection_with_mapping(homes, not_running):
 
 
 @requires_rsync
-def test_pull_single_project(homes, not_running):
+def test_pull_single_project(homes, not_busy):
     local, remote = homes
     make_session(remote, "work/webshop")
     make_session(remote, "work/blog")
@@ -124,7 +124,7 @@ def test_pull_single_project(homes, not_running):
 
 
 @requires_rsync
-def test_pull_project_that_only_exists_remotely(homes, not_running):
+def test_pull_project_that_only_exists_remotely(homes, not_busy):
     # selecting by local path works even before the project exists locally
     local, remote = homes
     make_session(remote, "work/newthing")
@@ -134,7 +134,7 @@ def test_pull_project_that_only_exists_remotely(homes, not_running):
 
 
 @requires_rsync
-def test_pull_missing_remote_project_errors(homes, not_running):
+def test_pull_missing_remote_project_errors(homes, not_busy):
     local, remote = homes
     make_session(remote, "work/webshop")
     with pytest.raises(sync.SyncError, match="not found on the remote"):
@@ -142,7 +142,7 @@ def test_pull_missing_remote_project_errors(homes, not_running):
 
 
 @requires_rsync
-def test_pull_selection_skips_extras(homes, not_running):
+def test_pull_selection_skips_extras(homes, not_busy):
     local, remote = homes
     make_session(remote, "work/webshop")
     (remote / ".claude" / "history.jsonl").write_text("{}\n", encoding="utf-8")
@@ -153,7 +153,7 @@ def test_pull_selection_skips_extras(homes, not_running):
 
 
 @requires_rsync
-def test_pull_selection_with_mapping(homes, not_running):
+def test_pull_selection_with_mapping(homes, not_busy):
     local, remote = homes
     make_session(remote, "projects/webshop")
     mappings = {f"{local}/work/webshop": f"{remote}/projects/webshop"}

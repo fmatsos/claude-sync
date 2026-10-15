@@ -359,12 +359,6 @@ def status(
         console.print(r"[dim]Wrong mapping? Add the project under \[mappings] in the config.[/dim]")
 
 
-def _refuse_if_running(force: bool) -> None:
-    if not force and sync_mod.claude_running():
-        console.print(f"[red]✗[/red] {sync_mod.RUNNING_MSG}")
-        raise typer.Exit(1)
-
-
 def _split_remote_args(cfg: Config, args: list[str]) -> tuple[str | None, list[str]]:
     """The first positional is a remote iff it exactly matches a configured
     remote name; everything else is a project selector."""
@@ -472,6 +466,16 @@ def _render_report(report: sync_mod.SyncReport, done_msg: str) -> None:
         )
         for path in report.skipped:
             console.print(f"  [dim]{path}[/dim]")
+    if report.busy:
+        console.print(
+            f"[yellow]⚠ {len(report.busy)} session file(s) left out — written to in the last "
+            f"{sync_mod.BUSY_SECONDS // 60} minutes (finish or stop that session, or use --force):"
+            "[/yellow]"
+        )
+        for path in report.busy:
+            console.print(f"  [dim]{path}[/dim]")
+    if report.backup_dir:
+        console.print(f"[dim]replaced files kept in {report.backup_dir}[/dim]")
     if report.summary and not report.dry_run:
         console.print(done_msg)
     _render_git_advisory(report)
@@ -484,6 +488,11 @@ _ARGS_HELP = (
     "paths (e.g. '.') or encoded names from status. Default: all projects."
 )
 _ALL_HELP = "Sync every configured remote; keep going if one fails."
+_FULL_HELP = (
+    "--diff (default): copy what is new, keep a newer destination file. "
+    "--full: overwrite every differing file on the destination (replaced files are "
+    "backed up; nothing is ever deleted)."
+)
 
 
 def _both_remote_and_all(cfg: Config, args: list[str]) -> None:
@@ -499,7 +508,10 @@ def push(
     all_remotes: bool = typer.Option(False, "--all", help=_ALL_HELP),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show what would sync."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Answer yes to prompts."),
-    force: bool = typer.Option(False, "--force", help="Sync even if Claude Code is running."),
+    force: bool = typer.Option(
+        False, "--force", help="Include session files written to in the last 2 minutes."
+    ),
+    full: bool = typer.Option(False, "--full/--diff", help=_FULL_HELP),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="List files skipped because the destination was newer."
     ),
@@ -507,9 +519,8 @@ def push(
         False, "--quiet-git", help="Skip the unpushed-git-work advisory."
     ),
 ) -> None:
-    """Send local sessions to a remote machine (merge, newer file wins)."""
+    """Send local sessions to a remote machine (merge by default, --full overwrites)."""
     cfg = _load_config()
-    _refuse_if_running(force)
     home = _local_home()
     check_git = not (quiet_git or yes)
     if all_remotes:
@@ -526,6 +537,8 @@ def push(
                 projects=selectors or None,
                 dry_run=dry_run,
                 force=True,
+                full=full,
+                include_busy=force,
                 verbose=verbose,
                 check_git=check_git,
                 log=_prefixed_log(name),
@@ -541,6 +554,8 @@ def push(
             projects=selectors or None,
             dry_run=dry_run,
             force=True,
+            full=full,
+            include_busy=force,
             verbose=verbose,
             check_git=check_git,
             log=_log,
@@ -558,14 +573,16 @@ def pull(
     all_remotes: bool = typer.Option(False, "--all", help=_ALL_HELP),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show what would sync."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Answer yes to prompts."),
-    force: bool = typer.Option(False, "--force", help="Sync even if Claude Code is running."),
+    force: bool = typer.Option(
+        False, "--force", help="Include session files written to in the last 2 minutes."
+    ),
+    full: bool = typer.Option(False, "--full/--diff", help=_FULL_HELP),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="List files skipped because the destination was newer."
     ),
 ) -> None:
-    """Fetch a remote's sessions and merge them in (merge, newer file wins)."""
+    """Fetch a remote's sessions (merge by default, --full overwrites)."""
     cfg = _load_config()
-    _refuse_if_running(force)
     home = _local_home()
     confirm = (lambda _msg: True) if yes else (lambda msg: typer.confirm(msg, default=True))
     if all_remotes:
@@ -582,6 +599,8 @@ def pull(
                 projects=selectors or None,
                 dry_run=dry_run,
                 force=True,
+                full=full,
+                include_busy=force,
                 verbose=verbose,
                 confirm=confirm,
                 log=_prefixed_log(name),
@@ -597,6 +616,8 @@ def pull(
             projects=selectors or None,
             dry_run=dry_run,
             force=True,
+            full=full,
+            include_busy=force,
             verbose=verbose,
             confirm=confirm,
             log=_log,

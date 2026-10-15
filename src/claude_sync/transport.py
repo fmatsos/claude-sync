@@ -4,21 +4,37 @@
 this machine, and rsync runs purely locally. Integration tests use this;
 it also works for syncing to a mounted disk.
 
-Safety: rsync always runs with ``-u`` (newer file wins) and never with
-``--delete`` — a sync can only add or update, never remove.
+Safety: rsync never runs with ``--delete`` — a sync can only add or update,
+never remove. It runs with ``-u`` (newer file wins) unless the caller asks
+for an overwrite, in which case every replaced file is kept in a backup dir.
 """
 
 from __future__ import annotations
 
+import math
 import shlex
 import shutil
 import subprocess
+import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 
 class TransportError(Exception):
     """rsync/ssh invocation failed or is impossible."""
+
+
+def recent_files(root: Path, seconds: int, *, now: float | None = None) -> list[str]:
+    """Session files (``*.jsonl``) under ``root`` written within ``seconds``,
+    as paths relative to ``root``. A session that is being written is a moving
+    target: copying it, or overwriting it, would catch it mid-append."""
+    if seconds <= 0 or not root.is_dir():
+        return []
+    cutoff = (time.time() if now is None else now) - seconds
+    return sorted(
+        str(p.relative_to(root)) for p in root.rglob("*.jsonl") if p.stat().st_mtime > cutoff
+    )
 
 
 # probe verdicts
@@ -141,18 +157,49 @@ class Transport:
                 f"could not create {self.remote_projects} on {self.host}: {r.stderr.strip()}"
             )
 
+    def recent_sessions(self, seconds: int) -> list[str]:
+        """Remote session files written within ``seconds``, relative to the
+        remote projects dir."""
+        if seconds <= 0:
+            return []
+        if not self.host:
+            return recent_files(Path(self.remote_projects), seconds)
+        minutes = math.ceil(seconds / 60)
+        # no -printf: BSD find (macOS) lacks it; the prefix is stripped here
+        r = self.run_ssh(
+            f"find {shlex.quote(self.remote_projects)} -name '*.jsonl' "
+            f"-mmin -{minutes} -print 2>/dev/null || true"
+        )
+        prefix = self.remote_projects + "/"
+        return sorted(
+            line.removeprefix(prefix) for line in r.stdout.splitlines() if line.startswith(prefix)
+        )
+
     def rsync(
-        self, src: str, dst: str, *, dry_run: bool = False, newer_wins: bool = True
+        self,
+        src: str,
+        dst: str,
+        *,
+        dry_run: bool = False,
+        newer_wins: bool = True,
+        backup_dir: str | None = None,
+        exclude: Sequence[str] = (),
     ) -> list[str]:
-        """Merge-copy src into dst; returns rsync's itemized change lines.
+        """Copy src into dst; returns rsync's itemized change lines.
 
         ``-u`` keeps whichever file is newer; nothing is ever deleted.
-        ``newer_wins=False`` drops ``-u`` — used only for the --verbose
-        dry-run that surfaces files a real merge skipped.
+        ``newer_wins=False`` drops ``-u``: any differing file is overwritten
+        (also used by the --verbose dry-run that surfaces files a real merge
+        skipped). ``backup_dir`` (an absolute path on the receiving side) keeps
+        a copy of every file that gets replaced. ``exclude`` lists paths
+        relative to the transfer root that must be left alone.
         """
         cmd = ["rsync", "-a", "--itemize-changes", "--exclude", "*.tmp"]
         if newer_wins:
             cmd.append("-u")
+        if backup_dir:
+            cmd += ["--backup", f"--backup-dir={backup_dir}"]
+        cmd += [f"--exclude=/{path}" for path in exclude]
         if dry_run:
             cmd.append("--dry-run")
         cmd += [src, dst]

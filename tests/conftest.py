@@ -24,9 +24,9 @@ def homes(tmp_path):
 
 
 @pytest.fixture
-def not_running(monkeypatch):
-    """Pretend Claude Code is not running (the real check would see this session)."""
-    monkeypatch.setattr(sync, "claude_running", lambda: False)
+def not_busy(monkeypatch):
+    """No session counts as 'being written to' (fresh fixture files would)."""
+    monkeypatch.setattr(sync, "BUSY_SECONDS", 0)
 
 
 def make_session(home: Path, rel: str, name: str = "s1.jsonl", extra: str = "") -> Path:

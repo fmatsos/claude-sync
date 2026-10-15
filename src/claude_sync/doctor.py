@@ -21,7 +21,7 @@ from claude_sync import projects as projects_mod
 from claude_sync import sync
 from claude_sync.config import Config, ConfigError, Remote, resolve_remote
 from claude_sync.remap import PathMapper
-from claude_sync.transport import PROBE_OK, Transport, probe_ssh
+from claude_sync.transport import PROBE_OK, Transport, probe_ssh, recent_files
 
 OK = "ok"
 WARN = "warn"
@@ -61,7 +61,7 @@ def run_checks(
             _check_remote(checks, remote, suffix)
     _check_git_state(checks, local_home)
     _check_other_stores(checks, local_home)
-    _check_claude_running(checks)
+    _check_busy_sessions(checks, local_home)
     _check_stale_temp_dirs(checks)
     return checks
 
@@ -291,17 +291,19 @@ def _check_clock_skew(checks: list[Check], transport: Transport, suffix: str = "
         checks.append(Check("clock skew" + suffix, OK, f"{skew}s"))
 
 
-def _check_claude_running(checks: list[Check]) -> None:
-    if sync.claude_running():
+def _check_busy_sessions(checks: list[Check], local_home: Path) -> None:
+    busy = recent_files(local_home / ".claude" / "projects", sync.BUSY_SECONDS)
+    if busy:
         checks.append(
             Check(
-                "claude code",
+                "active sessions",
                 WARN,
-                "appears to be running — sessions flush to disk only on exit",
+                f"{len(busy)} session file(s) written to in the last "
+                f"{sync.BUSY_SECONDS // 60} min — push/pull leave them out",
             )
         )
     else:
-        checks.append(Check("claude code", OK, "not running"))
+        checks.append(Check("active sessions", OK, "none written to recently"))
 
 
 def _check_stale_temp_dirs(checks: list[Check]) -> None:

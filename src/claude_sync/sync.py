@@ -3,9 +3,12 @@
 Invariants enforced here, not in the CLI:
 - ``~/.claude/projects`` is never mutated in place — remapping happens in a
   staging temp dir, and the only writes to real session dirs go through
-  ``rsync -u`` (newer file wins, never deletes).
-- Refuse to sync while Claude Code is running (it flushes sessions to disk
-  on exit), unless ``force=True``.
+  rsync, which never deletes: ``-u`` (newer file wins) by default, or a plain
+  overwrite with ``full=True`` — then every replaced file is kept in
+  ``<home>/.claude/sync-backup/<stamp>`` on the receiving machine.
+- A session file written within the last ``BUSY_SECONDS`` (on either machine)
+  is a moving target: it is left out of the transfer and reported, unless
+  ``include_busy=True``.
 - The first pull that would merge into existing local sessions offers a
   tarball backup first (via the ``confirm`` callback).
 """
@@ -14,8 +17,6 @@ from __future__ import annotations
 
 import difflib
 import os
-import re
-import subprocess
 import tarfile
 import tempfile
 from collections.abc import Callable, Sequence
@@ -32,32 +33,15 @@ from claude_sync.projects import (
     git_warnings,
 )
 from claude_sync.remap import PathMapper, encode_path, remap_file, remap_tree
-from claude_sync.transport import Transport
+from claude_sync.transport import Transport, recent_files
 
 _PULL_MARKER = ".claude-sync-pulled"
 
-RUNNING_MSG = (
-    "Claude Code appears to be running — it flushes sessions to disk on exit, "
-    "so the latest work would be missed. Quit it first, or pass --force."
-)
+BUSY_SECONDS = 120  # a session file written this recently is still being appended to
 
 
 class SyncError(Exception):
     """A sync could not proceed."""
-
-
-def claude_running() -> bool:
-    """Best-effort check for a running `claude` CLI process."""
-    try:
-        out = subprocess.run(
-            ["pgrep", "-fl", "claude"], capture_output=True, text=True
-        ).stdout
-    except FileNotFoundError:
-        return False
-    return any(
-        re.search(r"(^|/)claude(\s|$)", line.split(maxsplit=1)[-1])
-        for line in out.splitlines()
-    )
 
 
 @dataclass
@@ -73,6 +57,8 @@ class SyncReport:
     backup: Path | None = None
     skipped: list[str] = field(default_factory=list)  # dest was newer (--verbose)
     git: list[tuple[str, GitState]] = field(default_factory=list)  # advisory
+    busy: list[str] = field(default_factory=list)  # left out: written to just now
+    backup_dir: str | None = None  # --full: where replaced files were kept
     summary: dict[str, ChangeSummary] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -104,6 +90,63 @@ def summarize_changes(changes: list[str]) -> dict[str, ChangeSummary]:
 
 def _noop(_msg: str) -> None:
     pass
+
+
+def _changed_files(lines: list[str]) -> list[str]:
+    """File paths from rsync itemized lines (dirs and links are skipped)."""
+    files = []
+    for line in lines:
+        parts = line.split(maxsplit=1)
+        if len(parts) == 2 and len(parts[0]) >= 2 and parts[0][1] == "f":
+            files.append(parts[1])
+    return files
+
+
+def _translate(rel: str, mapper: PathMapper) -> str:
+    """``<project>/<file>`` with the project dir name remapped."""
+    project, _, rest = rel.partition("/")
+    return f"{mapper.remap_dirname(project)}/{rest}"
+
+
+def _backup_dir(home: str | Path) -> str:
+    return f"{str(home).rstrip('/')}/.claude/sync-backup/{datetime.now():%Y%m%d-%H%M%S}"
+
+
+def _copy(
+    transport: Transport,
+    src: str,
+    dst: str,
+    *,
+    dry_run: bool,
+    full: bool,
+    busy: set[str],
+    backup_dir: str,
+) -> tuple[list[str], list[str]]:
+    """One transfer: ``(itemized changes, busy files held back)``.
+
+    Only busy files the transfer would actually have touched are held back
+    and reported — an unchanged active session is not worth mentioning."""
+    held: list[str] = []
+    if busy:
+        planned = transport.rsync(src, dst, dry_run=True, newer_wins=not full)
+        held = sorted(set(_changed_files(planned)) & busy)
+    changes = transport.rsync(
+        src,
+        dst,
+        dry_run=dry_run,
+        newer_wins=not full,
+        backup_dir=backup_dir if full else None,
+        exclude=held,
+    )
+    return changes, held
+
+
+def _report_backup(changes: list[str], full: bool, dry_run: bool, backup_dir: str) -> str | None:
+    """The backup dir, when a --full run actually replaced existing files."""
+    if not full or dry_run:
+        return None
+    replaced = any(s.updated for s in summarize_changes(changes).values())
+    return backup_dir if replaced else None
 
 
 def _outside_home_error(
@@ -142,12 +185,7 @@ def _skipped_newer(transport: Transport, src: str, dst: str) -> list[str]:
     Run AFTER the real transfer: a dry-run with the same flags minus -u
     would now transfer exactly the files -u refused (everything else was
     just synced and compares equal)."""
-    skipped = []
-    for line in transport.rsync(src, dst, dry_run=True, newer_wins=False):
-        parts = line.split(maxsplit=1)
-        if len(parts) == 2 and len(parts[0]) >= 2 and parts[0][1] == "f":
-            skipped.append(parts[1])
-    return skipped
+    return _changed_files(transport.rsync(src, dst, dry_run=True, newer_wins=False))
 
 
 def _projects_dir(local_home: Path) -> Path:
@@ -193,6 +231,8 @@ def push(
     projects: Sequence[str] | None = None,
     dry_run: bool = False,
     force: bool = False,
+    full: bool = False,
+    include_busy: bool = False,
     verbose: bool = False,
     check_git: bool = False,
     log: Callable[[str], None] = _noop,
@@ -202,6 +242,9 @@ def push(
     ``remote`` names the target (resolved via config.resolve_remote).
     ``projects`` limits the push to the selected projects (paths or encoded
     names); the optional [sync] extras are skipped when a selection is given.
+    ``full`` overwrites differing remote files instead of keeping the newer
+    one (the replaced files are backed up on the remote); the [sync] extras
+    always merge. ``include_busy`` also sends session files written to just now.
     """
     target = resolve_remote(cfg, remote)
     local_home = Path(local_home) if local_home else Path.home()
@@ -215,14 +258,17 @@ def push(
         missing = sorted(only - known)
         if missing:
             raise _unknown_projects_error(missing, known)
-    if not force and claude_running():
-        raise SyncError(RUNNING_MSG)
     mapper = PathMapper.for_push(local_home, target.home, cfg.merged_mappings(target.name))
     if not force:
         outside = find_outside_home(src, local_home, mapper, only)
         if outside:
             raise _outside_home_error(outside, target, local_home, pull=False)
     transport = Transport(target.host, target.home)
+    busy: set[str] = set()
+    if not include_busy:
+        busy = {_translate(r, mapper) for r in recent_files(src, BUSY_SECONDS)}
+        busy |= set(transport.recent_sessions(BUSY_SECONDS))
+    backup_dir = _backup_dir(target.home)
     with tempfile.TemporaryDirectory(prefix="claude-sync-") as tmp:
         staging = Path(tmp) / "projects"
         log("remapping sessions into staging…")
@@ -230,18 +276,32 @@ def push(
         if not dry_run:
             transport.ensure_remote_projects()
         log("syncing to remote…")
-        changes = transport.rsync(
-            f"{staging}/", transport.remote_projects_arg + "/", dry_run=dry_run
+        changes, held = _copy(
+            transport,
+            f"{staging}/",
+            transport.remote_projects_arg + "/",
+            dry_run=dry_run,
+            full=full,
+            busy=busy,
+            backup_dir=backup_dir,
         )
+        replaced_in = _report_backup(changes, full, dry_run, backup_dir)
         skipped: list[str] = []
-        if verbose and not dry_run:
+        if verbose and not dry_run and not full:
             skipped = _skipped_newer(transport, f"{staging}/", transport.remote_projects_arg + "/")
         if only is None:
             changes += _push_extras(cfg, transport, local_home, mapper, Path(tmp), dry_run, log)
     git_notes: list[tuple[str, GitState]] = []
     if check_git and not dry_run:
         git_notes = git_warnings(src, only)
-    return SyncReport(changes=changes, dry_run=dry_run, skipped=skipped, git=git_notes)
+    return SyncReport(
+        changes=changes,
+        dry_run=dry_run,
+        skipped=skipped,
+        git=git_notes,
+        busy=held,
+        backup_dir=replaced_in,
+    )
 
 
 def pull(
@@ -252,6 +312,8 @@ def pull(
     projects: Sequence[str] | None = None,
     dry_run: bool = False,
     force: bool = False,
+    full: bool = False,
+    include_busy: bool = False,
     verbose: bool = False,
     confirm: Callable[[str], bool] = lambda _msg: True,
     log: Callable[[str], None] = _noop,
@@ -263,14 +325,15 @@ def pull(
     *local* path or encoded name — the selector is translated through the
     mapping and matched against the remote's project list, so a project
     that doesn't exist locally yet is valid. The [sync] extras are skipped
-    when a selection is given.
+    when a selection is given. ``full`` overwrites differing local files
+    instead of keeping the newer one (the replaced files are backed up under
+    ``~/.claude/sync-backup``); the extras always merge. ``include_busy``
+    also merges session files written to just now.
     """
     target = resolve_remote(cfg, remote)
     mappings = cfg.merged_mappings(target.name)
     local_home = Path(local_home) if local_home else Path.home()
     dest = _projects_dir(local_home)
-    if not force and claude_running():
-        raise SyncError(RUNNING_MSG)
     transport = Transport(target.host, target.home)
     remote_names: list[str] | None = None
     if projects:
@@ -326,16 +389,37 @@ def pull(
         if not dry_run:
             dest.mkdir(parents=True, exist_ok=True)
         log("merging into local sessions…")
-        changes = transport.rsync(f"{staging}/", f"{dest}/", dry_run=dry_run)
+        busy: set[str] = set()
+        if not include_busy:
+            busy = {_translate(r, mapper) for r in transport.recent_sessions(BUSY_SECONDS)}
+            busy |= set(recent_files(dest, BUSY_SECONDS))
+        backup_dir = _backup_dir(local_home)
+        changes, held = _copy(
+            transport,
+            f"{staging}/",
+            f"{dest}/",
+            dry_run=dry_run,
+            full=full,
+            busy=busy,
+            backup_dir=backup_dir,
+        )
+        replaced_in = _report_backup(changes, full, dry_run, backup_dir)
         skipped: list[str] = []
-        if verbose and not dry_run:
+        if verbose and not dry_run and not full:
             skipped = _skipped_newer(transport, f"{staging}/", f"{dest}/")
         if remote_names is None:
             changes += _pull_extras(cfg, transport, local_home, mapper, Path(tmp), dry_run, log)
         if not dry_run:
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.touch()
-    return SyncReport(changes=changes, dry_run=dry_run, backup=backup, skipped=skipped)
+    return SyncReport(
+        changes=changes,
+        dry_run=dry_run,
+        backup=backup,
+        skipped=skipped,
+        busy=held,
+        backup_dir=replaced_in,
+    )
 
 
 def _relabel(lines: list[str], prefix: str) -> list[str]:

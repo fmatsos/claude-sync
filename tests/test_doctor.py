@@ -10,11 +10,11 @@ from conftest import local_cfg, make_session
 
 @pytest.fixture
 def quiet_env(monkeypatch, tmp_path):
-    """No stale temp dirs, Claude not running."""
+    """No stale temp dirs, no session counted as active."""
     fake_tmp = tmp_path / "faketmp"
     fake_tmp.mkdir()
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(fake_tmp))
-    monkeypatch.setattr(sync, "claude_running", lambda: False)
+    monkeypatch.setattr(sync, "BUSY_SECONDS", 0)
     return fake_tmp
 
 
@@ -41,7 +41,7 @@ def test_healthy_local_mode(homes, tmp_path, quiet_env):
     assert checks["ssh"].status == doctor.OK
     assert "local-path" in checks["ssh"].detail
     assert checks["remote sessions"].status == doctor.OK
-    assert checks["claude code"].status == doctor.OK
+    assert checks["active sessions"].status == doctor.OK
     assert checks["temp dirs"].status == doctor.OK
     assert not any(c.status == doctor.FAIL for c in checks.values())
 
@@ -51,7 +51,7 @@ def test_missing_config_fails_and_skips_remote(homes, tmp_path, quiet_env):
     checks = by_name(doctor.run_checks(tmp_path / "missing.toml", local))
     assert checks["config"].status == doctor.FAIL
     assert "ssh" not in checks
-    assert "claude code" in checks  # local checks still run
+    assert "active sessions" in checks  # local checks still run
 
 
 def test_ambiguous_mappings_fail(homes, tmp_path, quiet_env):
@@ -80,12 +80,13 @@ def test_missing_remote_projects_warns(homes, tmp_path, quiet_env):
     assert "first push" in checks["remote sessions"].detail
 
 
-def test_claude_running_warns(homes, tmp_path, quiet_env, monkeypatch):
+def test_active_session_warns(homes, tmp_path, quiet_env, monkeypatch):
     local, remote = homes
-    monkeypatch.setattr(sync, "claude_running", lambda: True)
+    monkeypatch.setattr(sync, "BUSY_SECONDS", 120)
+    make_session(local, "work/webshop")  # just written
     checks = by_name(doctor.run_checks(write_cfg(tmp_path, remote), local))
-    assert checks["claude code"].status == doctor.WARN
-    assert "exit" in checks["claude code"].detail
+    assert checks["active sessions"].status == doctor.WARN
+    assert "leave them out" in checks["active sessions"].detail
 
 
 def write_cfg2(tmp_path, home_a, home_b):

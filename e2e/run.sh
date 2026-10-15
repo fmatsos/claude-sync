@@ -51,7 +51,7 @@ lx 'mkdir -p ~/.config/claude-sync &&
 step "legacy pass: doctor / status / push work on the old format"
 lx 'claude-sync doctor'
 lx 'claude-sync status'
-lx 'claude-sync push --yes'
+lx 'claude-sync push --yes --force'
 lx 'claude-sync status 2>&1 >/dev/null | grep -q "run claude-sync remotes migrate to upgrade it"'
 echo "ok: legacy config works and hints at migration on stderr"
 
@@ -76,7 +76,7 @@ mc 'mkdir -p ~/.claude/projects/-Users-tester-other-beta &&
       > ~/.claude/projects/-Users-tester-other-beta/s1.jsonl'
 
 step "claude-sync pull on linux"
-lx 'claude-sync pull --yes'
+lx 'claude-sync pull --yes --force'
 
 step "assert merge on linux"
 lx 'test -f ~/.claude/projects/-home-tester-work-webshop/s1.jsonl'
@@ -90,7 +90,7 @@ echo "ok: pull merged and remapped, no /Users/tester leakage"
 step "second round trip: a session resumed on mac must come back"
 mc 'printf "%s\n" "{\"cwd\":\"/Users/tester/work/webshop\",\"msg\":\"resumed on mac\"}" \
       >> ~/.claude/projects/-Users-tester-work-webshop/s2.jsonl'
-lx 'claude-sync pull --yes'
+lx 'claude-sync pull --yes --force'
 lx 'grep -q "resumed on mac" ~/.claude/projects/-home-tester-work-webshop/s2.jsonl'
 lx 'grep -q "{\"cwd\":\"/home/tester/work/webshop\",\"msg\":\"resumed on mac\"}" \
       ~/.claude/projects/-home-tester-work-webshop/s2.jsonl'
@@ -107,7 +107,7 @@ lx 'mkdir -p ~/.claude/projects/-home-tester-work-gamma ~/.claude/projects/-home
       > ~/.claude/projects/-home-tester-work-gamma/s1.jsonl &&
     printf "%s\n" "{\"cwd\":\"/home/tester/work/delta\"}" \
       > ~/.claude/projects/-home-tester-work-delta/s1.jsonl'
-lx 'claude-sync push --yes /home/tester/work/gamma'
+lx 'claude-sync push --yes --force /home/tester/work/gamma'
 mc 'test -f ~/.claude/projects/-Users-tester-work-gamma/s1.jsonl'
 mc '! test -e ~/.claude/projects/-Users-tester-work-delta'
 echo "ok: single-project push transferred only gamma"
@@ -116,8 +116,31 @@ step "single-project pull (epsilon exists only on mac)"
 mc 'mkdir -p ~/.claude/projects/-Users-tester-work-epsilon &&
     printf "%s\n" "{\"cwd\":\"/Users/tester/work/epsilon\"}" \
       > ~/.claude/projects/-Users-tester-work-epsilon/s1.jsonl'
-lx 'claude-sync pull --yes /home/tester/work/epsilon'
+lx 'claude-sync pull --yes --force /home/tester/work/epsilon'
 lx 'grep -q "\"cwd\":\"/home/tester/work/epsilon\"" ~/.claude/projects/-home-tester-work-epsilon/s1.jsonl'
 echo "ok: single-project pull fetched only epsilon"
+
+step "busy guard: a session written just now is left out, --force sends it"
+lx 'mkdir -p ~/.claude/projects/-home-tester-work-busy &&
+    printf "%s\n" "{\"cwd\":\"/home/tester/work/busy\"}" \
+      > ~/.claude/projects/-home-tester-work-busy/s1.jsonl'
+BUSY_OUT=$(lx 'claude-sync push --yes /home/tester/work/busy')
+echo "$BUSY_OUT"
+grep -q "left out" <<<"$BUSY_OUT"
+mc '! test -e ~/.claude/projects/-Users-tester-work-busy/s1.jsonl'
+lx 'claude-sync push --yes --force /home/tester/work/busy'
+mc 'test -f ~/.claude/projects/-Users-tester-work-busy/s1.jsonl'
+echo "ok: busy session held back, then sent with --force"
+
+step "--diff keeps a newer mac file, --full overwrites it and keeps a backup"
+lx 'touch -d "1 hour ago" ~/.claude/projects/-home-tester-work-busy/s1.jsonl'
+mc 'echo "newer on mac" >> ~/.claude/projects/-Users-tester-work-busy/s1.jsonl &&
+    touch -d "30 minutes ago" ~/.claude/projects/-Users-tester-work-busy/s1.jsonl'
+lx 'claude-sync push --yes --diff /home/tester/work/busy'
+mc 'grep -q "newer on mac" ~/.claude/projects/-Users-tester-work-busy/s1.jsonl'
+lx 'claude-sync push --yes --full /home/tester/work/busy'
+mc '! grep -q "newer on mac" ~/.claude/projects/-Users-tester-work-busy/s1.jsonl'
+mc 'grep -rq "newer on mac" ~/.claude/sync-backup'
+echo "ok: --diff kept the newer file; --full replaced it and backed it up on mac"
 
 printf '\n\033[32mE2E OK\033[0m\n'
