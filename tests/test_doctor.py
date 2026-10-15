@@ -2,9 +2,9 @@ import tempfile
 
 import pytest
 
-from claude_hop import config as config_mod
-from claude_hop import doctor, sync
-from claude_hop.config import Config, Remote
+from claude_sync import config as config_mod
+from claude_sync import doctor, sync
+from claude_sync.config import Config, Remote
 from conftest import local_cfg, make_session
 
 
@@ -208,7 +208,7 @@ def test_other_stores_note(tmp_path):
     doctor._check_other_stores(checks, mine, roots=(str(fake_home_root),), euid=1000)
     assert len(checks) == 1
     assert checks[0].status == doctor.OK
-    assert "claude-hop only syncs the store of the current user" in checks[0].detail
+    assert "claude-sync only syncs the store of the current user" in checks[0].detail
     assert str(fake_home_root / "tasos" / ".claude") in checks[0].detail
 
 
@@ -246,7 +246,7 @@ def test_other_stores_skips_empty_and_missing(tmp_path):
 
 def test_stale_temp_dirs_warn(homes, tmp_path, quiet_env):
     local, remote = homes
-    (quiet_env / "claude-hop-abc123").mkdir()
+    (quiet_env / "claude-sync-abc123").mkdir()
     checks = by_name(doctor.run_checks(write_cfg(tmp_path, remote), local))
     assert checks["temp dirs"].status == doctor.WARN
-    assert "claude-hop-abc123" in checks["temp dirs"].detail
+    assert "claude-sync-abc123" in checks["temp dirs"].detail

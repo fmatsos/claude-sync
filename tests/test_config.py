@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_hop import config
-from claude_hop.config import Config, ConfigError, Remote, resolve_remote
+from claude_sync import config
+from claude_sync.config import Config, ConfigError, Remote, resolve_remote
 
 MULTI = """\
 [remotes.mac]
@@ -271,9 +271,9 @@ def test_zero_remote_round_trip(tmp_path):
 
 def test_default_config_path_honours_xdg(monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", "/custom/xdg")
-    assert config.default_config_path() == Path("/custom/xdg/claude-hop/config.toml")
+    assert config.default_config_path() == Path("/custom/xdg/claude-sync/config.toml")
 
 
 def test_default_config_path_fallback(monkeypatch):
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    assert config.default_config_path() == Path.home() / ".config/claude-hop/config.toml"
+    assert config.default_config_path() == Path.home() / ".config/claude-sync/config.toml"

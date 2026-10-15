@@ -1,6 +1,6 @@
 import pytest
 
-from claude_hop.transport import (
+from claude_sync.transport import (
     PROBE_DNS,
     PROBE_NO_AUTH,
     PROBE_TIMEOUT,

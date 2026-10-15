@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from claude_hop import sync
-from claude_hop.config import Config, Remote
-from claude_hop.remap import encode_path
+from claude_sync import sync
+from claude_sync.config import Config, Remote
+from claude_sync.remap import encode_path
 
 requires_rsync = pytest.mark.skipif(
     shutil.which("rsync") is None, reason="rsync not installed"

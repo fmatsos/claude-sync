@@ -23,18 +23,18 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from claude_hop.config import Config, Remote, resolve_remote
-from claude_hop.projects import (
+from claude_sync.config import Config, Remote, resolve_remote
+from claude_sync.projects import (
     GitState,
     OutsideReport,
     cluster_prefixes,
     find_outside_home,
     git_warnings,
 )
-from claude_hop.remap import PathMapper, encode_path, remap_file, remap_tree
-from claude_hop.transport import Transport
+from claude_sync.remap import PathMapper, encode_path, remap_file, remap_tree
+from claude_sync.transport import Transport
 
-_PULL_MARKER = ".claude-hop-pulled"
+_PULL_MARKER = ".claude-sync-pulled"
 
 RUNNING_MSG = (
     "Claude Code appears to be running — it flushes sessions to disk on exit, "
@@ -181,7 +181,7 @@ def _unknown_projects_error(missing: list[str], known: set[str]) -> SyncError:
         close = difflib.get_close_matches(name, known, n=1)
         parts.append(name + (f" (did you mean {close[0]}?)" if close else ""))
     return SyncError(
-        "unknown local project(s): " + "; ".join(parts) + " — run claude-hop status for the list"
+        "unknown local project(s): " + "; ".join(parts) + " — run claude-sync status for the list"
     )
 
 
@@ -223,7 +223,7 @@ def push(
         if outside:
             raise _outside_home_error(outside, target, local_home, pull=False)
     transport = Transport(target.host, target.home)
-    with tempfile.TemporaryDirectory(prefix="claude-hop-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="claude-sync-") as tmp:
         staging = Path(tmp) / "projects"
         log("remapping sessions into staging…")
         remap_tree(src, staging, mapper, only=only)
@@ -289,7 +289,7 @@ def pull(
         raise SyncError(f"no sessions on the remote ({transport.remote_projects} is missing)")
     mapper = PathMapper.for_pull(local_home, target.home, mappings)
     backup: Path | None = None
-    with tempfile.TemporaryDirectory(prefix="claude-hop-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="claude-sync-") as tmp:
         raw = Path(tmp) / "raw"
         staging = Path(tmp) / "projects"
         raw.mkdir()
@@ -427,7 +427,7 @@ def _make_backup(projects: Path, local_home: Path) -> Path:
     backups = local_home / ".claude" / "backups"
     backups.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = backups / f"claude-hop-projects-{stamp}.tar.gz"
+    path = backups / f"claude-sync-projects-{stamp}.tar.gz"
     with tarfile.open(path, "w:gz") as tar:
         tar.add(projects, arcname="projects")
     return path

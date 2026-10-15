@@ -12,8 +12,8 @@ wheels = [
 ]
 
 [[package]]
-name = "claude-hop"
-version = "0.4.0"
+name = "claude-sync"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "rich" },

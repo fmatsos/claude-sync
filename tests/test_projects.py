@@ -7,8 +7,8 @@ import subprocess
 
 import pytest
 
-from claude_hop import projects
-from claude_hop.remap import PathMapper, encode_path
+from claude_sync import projects
+from claude_sync.remap import PathMapper, encode_path
 
 LOCAL = "/home/alice"
 MAPPER = PathMapper.for_push(LOCAL, "/Users/alice")

@@ -19,12 +19,12 @@ docker compose up -d --build --quiet-pull
 
 step "probe before key auth: must say no-auth, never timeout"
 lx 'until (echo > /dev/tcp/mac/22) 2>/dev/null; do sleep 1; done'  # wait for sshd only
-lx 'mkdir -p ~/.config/claude-hop &&
+lx 'mkdir -p ~/.config/claude-sync &&
     printf "[remote]\nhost = \"mac\"\nhome = \"/Users/tester\"\n" \
-      > ~/.config/claude-hop/config.toml'
-PROBE_OUT=$(lx 'claude-hop remotes list --check 2>/dev/null')
+      > ~/.config/claude-sync/config.toml'
+PROBE_OUT=$(lx 'claude-sync remotes list --check 2>/dev/null')
 echo "$PROBE_OUT" | grep -q "no auth"
-DOCTOR_OUT=$(lx 'claude-hop doctor 2>&1 || true')
+DOCTOR_OUT=$(lx 'claude-sync doctor 2>&1 || true')
 echo "$DOCTOR_OUT" | grep -q "ssh-copy-id"
 echo "ok: keyless probe reports no-auth with the ssh-copy-id fix"
 
@@ -44,22 +44,22 @@ step "seed sessions and LEGACY-format config on linux"
 lx 'mkdir -p ~/.claude/projects/-home-tester-work-webshop &&
     printf "%s\n" "{\"cwd\":\"/home/tester/work/webshop\",\"msg\":\"from linux\"}" \
       > ~/.claude/projects/-home-tester-work-webshop/s1.jsonl'
-lx 'mkdir -p ~/.config/claude-hop &&
+lx 'mkdir -p ~/.config/claude-sync &&
     printf "[remote]\nhost = \"mac\"\nhome = \"/Users/tester\"\n" \
-      > ~/.config/claude-hop/config.toml'
+      > ~/.config/claude-sync/config.toml'
 
 step "legacy pass: doctor / status / push work on the old format"
-lx 'claude-hop doctor'
-lx 'claude-hop status'
-lx 'claude-hop push --yes'
-lx 'claude-hop status 2>&1 >/dev/null | grep -q "run claude-hop remotes migrate to upgrade it"'
+lx 'claude-sync doctor'
+lx 'claude-sync status'
+lx 'claude-sync push --yes'
+lx 'claude-sync status 2>&1 >/dev/null | grep -q "run claude-sync remotes migrate to upgrade it"'
 echo "ok: legacy config works and hints at migration on stderr"
 
 step "migrate to the multi-remote format"
-lx 'claude-hop remotes migrate'
-lx 'test -f ~/.config/claude-hop/config.toml.bak'
-lx 'grep -q "\[remotes.default\]" ~/.config/claude-hop/config.toml'
-lx 'claude-hop remotes'
+lx 'claude-sync remotes migrate'
+lx 'test -f ~/.config/claude-sync/config.toml.bak'
+lx 'grep -q "\[remotes.default\]" ~/.config/claude-sync/config.toml'
+lx 'claude-sync remotes'
 echo "ok: migrated; everything below runs on the new format"
 
 step "assert remapped sessions on mac"
@@ -75,8 +75,8 @@ mc 'mkdir -p ~/.claude/projects/-Users-tester-other-beta &&
     printf "%s\n" "{\"cwd\":\"/Users/tester/other/beta\"}" \
       > ~/.claude/projects/-Users-tester-other-beta/s1.jsonl'
 
-step "claude-hop pull on linux"
-lx 'claude-hop pull --yes'
+step "claude-sync pull on linux"
+lx 'claude-sync pull --yes'
 
 step "assert merge on linux"
 lx 'test -f ~/.claude/projects/-home-tester-work-webshop/s1.jsonl'
@@ -90,14 +90,14 @@ echo "ok: pull merged and remapped, no /Users/tester leakage"
 step "second round trip: a session resumed on mac must come back"
 mc 'printf "%s\n" "{\"cwd\":\"/Users/tester/work/webshop\",\"msg\":\"resumed on mac\"}" \
       >> ~/.claude/projects/-Users-tester-work-webshop/s2.jsonl'
-lx 'claude-hop pull --yes'
+lx 'claude-sync pull --yes'
 lx 'grep -q "resumed on mac" ~/.claude/projects/-home-tester-work-webshop/s2.jsonl'
 lx 'grep -q "{\"cwd\":\"/home/tester/work/webshop\",\"msg\":\"resumed on mac\"}" \
       ~/.claude/projects/-home-tester-work-webshop/s2.jsonl'
 echo "ok: resumed-session update arrived remapped on the second pull"
 
-step "claude-hop diff (both directions should be in sync)"
-DIFF_OUT=$(lx 'claude-hop diff')
+step "claude-sync diff (both directions should be in sync)"
+DIFF_OUT=$(lx 'claude-sync diff')
 echo "$DIFF_OUT"
 [ "$(grep -c 'already in sync' <<<"$DIFF_OUT")" -eq 2 ]
 
@@ -107,7 +107,7 @@ lx 'mkdir -p ~/.claude/projects/-home-tester-work-gamma ~/.claude/projects/-home
       > ~/.claude/projects/-home-tester-work-gamma/s1.jsonl &&
     printf "%s\n" "{\"cwd\":\"/home/tester/work/delta\"}" \
       > ~/.claude/projects/-home-tester-work-delta/s1.jsonl'
-lx 'claude-hop push --yes /home/tester/work/gamma'
+lx 'claude-sync push --yes /home/tester/work/gamma'
 mc 'test -f ~/.claude/projects/-Users-tester-work-gamma/s1.jsonl'
 mc '! test -e ~/.claude/projects/-Users-tester-work-delta'
 echo "ok: single-project push transferred only gamma"
@@ -116,7 +116,7 @@ step "single-project pull (epsilon exists only on mac)"
 mc 'mkdir -p ~/.claude/projects/-Users-tester-work-epsilon &&
     printf "%s\n" "{\"cwd\":\"/Users/tester/work/epsilon\"}" \
       > ~/.claude/projects/-Users-tester-work-epsilon/s1.jsonl'
-lx 'claude-hop pull --yes /home/tester/work/epsilon'
+lx 'claude-sync pull --yes /home/tester/work/epsilon'
 lx 'grep -q "\"cwd\":\"/home/tester/work/epsilon\"" ~/.claude/projects/-home-tester-work-epsilon/s1.jsonl'
 echo "ok: single-project pull fetched only epsilon"
 

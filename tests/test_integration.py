@@ -6,8 +6,8 @@ import tarfile
 
 import pytest
 
-from claude_hop import sync
-from claude_hop.remap import encode_path
+from claude_sync import sync
+from claude_sync.remap import encode_path
 from conftest import local_cfg, make_session, requires_rsync, session_cwd
 
 pytestmark = requires_rsync

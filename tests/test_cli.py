@@ -1,10 +1,10 @@
 import pytest
 from typer.testing import CliRunner
 
-from claude_hop import config as config_mod
-from claude_hop.cli import app
-from claude_hop.config import Config, Remote
-from claude_hop.remap import encode_path
+from claude_sync import config as config_mod
+from claude_sync.cli import app
+from claude_sync.config import Config, Remote
+from claude_sync.remap import encode_path
 from conftest import local_cfg, make_session, requires_rsync, session_cwd
 
 runner = CliRunner()
@@ -16,8 +16,8 @@ def env(homes, monkeypatch, tmp_path):
     local, remote = homes
     cfg_path = tmp_path / "config.toml"
     config_mod.save(local_cfg(remote), cfg_path)
-    monkeypatch.setenv("CLAUDE_HOP_CONFIG", str(cfg_path))
-    monkeypatch.setenv("CLAUDE_HOP_HOME", str(local))
+    monkeypatch.setenv("CLAUDE_SYNC_CONFIG", str(cfg_path))
+    monkeypatch.setenv("CLAUDE_SYNC_HOME", str(local))
     monkeypatch.setenv("COLUMNS", "400")
     return local, remote, cfg_path
 
@@ -25,7 +25,7 @@ def env(homes, monkeypatch, tmp_path):
 def test_version():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "claude-hop" in result.output
+    assert "claude-sync" in result.output
 
 
 def test_status_lists_projects_and_mapping(env, not_running):
@@ -53,11 +53,11 @@ def test_status_flags_outside_home_projects(env, not_running):
 
 
 def test_status_without_config(homes, monkeypatch, tmp_path):
-    monkeypatch.setenv("CLAUDE_HOP_CONFIG", str(tmp_path / "missing.toml"))
-    monkeypatch.setenv("CLAUDE_HOP_HOME", str(homes[0]))
+    monkeypatch.setenv("CLAUDE_SYNC_CONFIG", str(tmp_path / "missing.toml"))
+    monkeypatch.setenv("CLAUDE_SYNC_HOME", str(homes[0]))
     result = runner.invoke(app, ["status"])
     assert result.exit_code == 1
-    assert "claude-hop init" in result.output
+    assert "claude-sync init" in result.output
 
 
 @requires_rsync
@@ -142,7 +142,7 @@ def test_diff_single_project_cli(env, not_running):
 def test_push_refuses_while_running(env, monkeypatch):
     local, _, _ = env
     make_session(local, "work/webshop")
-    from claude_hop import sync
+    from claude_sync import sync
 
     monkeypatch.setattr(sync, "claude_running", lambda: True)
     result = runner.invoke(app, ["push"])
@@ -182,8 +182,8 @@ def test_doctor_healthy(env, not_running, monkeypatch, tmp_path):
 
 
 def test_doctor_fails_without_config(homes, monkeypatch, tmp_path):
-    monkeypatch.setenv("CLAUDE_HOP_CONFIG", str(tmp_path / "missing.toml"))
-    monkeypatch.setenv("CLAUDE_HOP_HOME", str(homes[0]))
+    monkeypatch.setenv("CLAUDE_SYNC_CONFIG", str(tmp_path / "missing.toml"))
+    monkeypatch.setenv("CLAUDE_SYNC_HOME", str(homes[0]))
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 1
     assert "check(s) failed" in result.output
@@ -203,8 +203,8 @@ def multi_env(homes, monkeypatch, tmp_path):
     )
     cfg_path = tmp_path / "config.toml"
     config_mod.save(cfg, cfg_path)
-    monkeypatch.setenv("CLAUDE_HOP_CONFIG", str(cfg_path))
-    monkeypatch.setenv("CLAUDE_HOP_HOME", str(local))
+    monkeypatch.setenv("CLAUDE_SYNC_CONFIG", str(cfg_path))
+    monkeypatch.setenv("CLAUDE_SYNC_HOME", str(local))
     monkeypatch.setenv("COLUMNS", "400")
     return local, mac_home, pad_home, cfg_path
 
@@ -215,8 +215,8 @@ def mac_env(homes, monkeypatch, tmp_path):
     local, mac_home = homes
     cfg_path = tmp_path / "config.toml"
     config_mod.save(local_cfg(mac_home, name="mac"), cfg_path)
-    monkeypatch.setenv("CLAUDE_HOP_CONFIG", str(cfg_path))
-    monkeypatch.setenv("CLAUDE_HOP_HOME", str(local))
+    monkeypatch.setenv("CLAUDE_SYNC_CONFIG", str(cfg_path))
+    monkeypatch.setenv("CLAUDE_SYNC_HOME", str(local))
     monkeypatch.setenv("COLUMNS", "400")
     return local, mac_home
 
@@ -372,29 +372,11 @@ def test_encoded_selector_via_double_dash(multi_env, not_running):
     assert not (projects / encode_path(f"{mac_home}/work/blog")).exists()
 
 
-def test_upgrade_already_up_to_date(monkeypatch):
-    from claude_hop import banner, upgrade
-
-    monkeypatch.setattr(upgrade, "latest_version", lambda: banner.get_version())
-    result = runner.invoke(app, ["upgrade"])
-    assert result.exit_code == 0
-    assert "already up to date" in result.output
-
-
-def test_upgrade_refuses_dev_checkout(monkeypatch):
-    from claude_hop import upgrade
-
-    monkeypatch.setattr(upgrade, "latest_version", lambda: "999.0.0")
-    result = runner.invoke(app, ["upgrade"])
-    assert result.exit_code == 1
-    assert "git pull" in result.output
-
-
 def test_init_local_mode_writes_config(homes, monkeypatch, tmp_path):
     local, remote = homes
     cfg_path = tmp_path / "cfg" / "config.toml"
-    monkeypatch.setenv("CLAUDE_HOP_CONFIG", str(cfg_path))
-    monkeypatch.setenv("CLAUDE_HOP_HOME", str(local))
+    monkeypatch.setenv("CLAUDE_SYNC_CONFIG", str(cfg_path))
+    monkeypatch.setenv("CLAUDE_SYNC_HOME", str(local))
     # prompts: host (empty), local dir, remote name (accept default "local")
     result = runner.invoke(app, ["init"], input=f"\n{remote}\n\n")
     assert result.exit_code == 0, result.output
@@ -409,8 +391,8 @@ def test_legacy_config_prints_migrate_hint(homes, monkeypatch, tmp_path):
     make_session(local, "work/webshop")
     cfg_path = tmp_path / "config.toml"
     cfg_path.write_text(f'[remote]\nhost = ""\nhome = "{remote}"\n', encoding="utf-8")
-    monkeypatch.setenv("CLAUDE_HOP_CONFIG", str(cfg_path))
-    monkeypatch.setenv("CLAUDE_HOP_HOME", str(local))
+    monkeypatch.setenv("CLAUDE_SYNC_CONFIG", str(cfg_path))
+    monkeypatch.setenv("CLAUDE_SYNC_HOME", str(local))
     monkeypatch.setenv("COLUMNS", "300")
     result = runner.invoke(app, ["status"])
     assert result.exit_code == 0, result.output
@@ -420,8 +402,8 @@ def test_legacy_config_prints_migrate_hint(homes, monkeypatch, tmp_path):
 
 
 def test_init_refuses_relative_home(monkeypatch, tmp_path):
-    monkeypatch.setenv("CLAUDE_HOP_CONFIG", str(tmp_path / "config.toml"))
-    monkeypatch.setenv("CLAUDE_HOP_HOME", str(tmp_path))
+    monkeypatch.setenv("CLAUDE_SYNC_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("CLAUDE_SYNC_HOME", str(tmp_path))
     result = runner.invoke(app, ["init"], input="\nnot/absolute\n")
     assert result.exit_code == 1
     assert "absolute" in result.output

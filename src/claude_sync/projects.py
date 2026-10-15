@@ -17,7 +17,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from claude_hop.remap import PathMapper, encode_path
+from claude_sync.remap import PathMapper, encode_path
 
 _CWD_SCAN_LINES = 25  # per session file
 

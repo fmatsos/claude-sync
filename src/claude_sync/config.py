@@ -7,7 +7,7 @@ where ``home`` is a directory on this machine.
 
 The legacy single-``[remote]`` format still loads, as a remote named
 "default", with ``cfg.legacy`` set so the CLI can hint at
-``claude-hop remotes migrate``. Migration is never automatic.
+``claude-sync remotes migrate``. Migration is never automatic.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ class ConfigError(Exception):
 def default_config_path() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME")
     root = Path(base) if base else Path.home() / ".config"
-    return root / "claude-hop" / "config.toml"
+    return root / "claude-sync" / "config.toml"
 
 
 @dataclass
@@ -62,7 +62,7 @@ def resolve_remote(cfg: Config, name: str | None) -> Remote:
     """Pick the remote to operate on. Explicit name wins; a sole remote is
     used silently; anything else is an error that names the options."""
     if not cfg.remotes:
-        raise ConfigError("no remotes configured — run: claude-hop init")
+        raise ConfigError("no remotes configured — run: claude-sync init")
     if name is None:
         if len(cfg.remotes) == 1:
             return next(iter(cfg.remotes.values()))
@@ -77,7 +77,7 @@ def resolve_remote(cfg: Config, name: str | None) -> Remote:
 def load(path: str | Path | None = None) -> Config:
     path = Path(path) if path is not None else default_config_path()
     if not path.exists():
-        raise ConfigError(f"no config at {path} — run: claude-hop init")
+        raise ConfigError(f"no config at {path} — run: claude-sync init")
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:

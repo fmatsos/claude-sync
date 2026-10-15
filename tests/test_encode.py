@@ -1,4 +1,4 @@
-from claude_hop.remap import encode_path
+from claude_sync.remap import encode_path
 
 
 def test_basic_home_path():

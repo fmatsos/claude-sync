@@ -2,8 +2,8 @@
 only parses arguments, prompts, and renders rich output.
 
 Environment hooks (used by tests and the e2e harness):
-- ``CLAUDE_HOP_CONFIG`` — config file path (same as ``--config``)
-- ``CLAUDE_HOP_HOME`` — treat this directory as the local home
+- ``CLAUDE_SYNC_CONFIG`` — config file path (same as ``--config``)
+- ``CLAUDE_SYNC_HOME`` — treat this directory as the local home
 """
 
 import difflib
@@ -16,15 +16,15 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from claude_hop import __version__
-from claude_hop import config as config_mod
-from claude_hop import projects as projects_mod
-from claude_hop import sync as sync_mod
-from claude_hop.banner import get_version, show_banner
-from claude_hop.config import Config, ConfigError, Remote, resolve_remote
-from claude_hop.remap import PathMapper
-from claude_hop.sync import SyncError
-from claude_hop.transport import (
+from claude_sync import __version__
+from claude_sync import config as config_mod
+from claude_sync import projects as projects_mod
+from claude_sync import sync as sync_mod
+from claude_sync.banner import get_version, show_banner
+from claude_sync.config import Config, ConfigError, Remote, resolve_remote
+from claude_sync.remap import PathMapper
+from claude_sync.sync import SyncError
+from claude_sync.transport import (
     BATCH_SSH_OPTS,
     PROBE_NO_AUTH,
     PROBE_OK,
@@ -51,7 +51,7 @@ _FAILURES = (ConfigError, SyncError, TransportError, ValueError)
 
 def _version_callback(value: bool) -> None:
     if value:
-        print(f"claude-hop {__version__}")
+        print(f"claude-sync {__version__}")
         raise typer.Exit()
 
 
@@ -61,8 +61,8 @@ def _root(
         None,
         "--config",
         "-c",
-        envvar="CLAUDE_HOP_CONFIG",
-        help="Config file (default: ~/.config/claude-hop/config.toml).",
+        envvar="CLAUDE_SYNC_CONFIG",
+        help="Config file (default: ~/.config/claude-sync/config.toml).",
     ),
     version: bool = typer.Option(
         False, "--version", callback=_version_callback, is_eager=True,
@@ -77,7 +77,7 @@ def _config_path() -> Path:
 
 
 def _local_home() -> Path:
-    return Path(os.environ.get("CLAUDE_HOP_HOME") or Path.home())
+    return Path(os.environ.get("CLAUDE_SYNC_HOME") or Path.home())
 
 
 def _fail(exc: Exception) -> typer.Exit:
@@ -93,7 +93,7 @@ def _load_config() -> Config:
     if cfg.legacy:
         err_console.print(
             "[dim]note: this config uses the old single-remote format — "
-            "run claude-hop remotes migrate to upgrade it[/dim]"
+            "run claude-sync remotes migrate to upgrade it[/dim]"
         )
     return cfg
 
@@ -113,7 +113,7 @@ def init() -> None:
     remote = _wizard_remote(name=None)
     config_mod.save(Config(remotes={remote.name: remote}), path)
     console.print(f"[green]✓[/green] wrote {path}")
-    console.print("Run [bold]claude-hop status[/bold] to check how your projects will map.")
+    console.print("Run [bold]claude-sync status[/bold] to check how your projects will map.")
 
 
 def _init_existing(path: Path) -> None:
@@ -151,7 +151,7 @@ def _require_new_format(cfg: Config) -> None:
         raise _fail(
             ConfigError(
                 "this config uses the legacy single-remote format — "
-                "run claude-hop remotes migrate first"
+                "run claude-sync remotes migrate first"
             )
         )
 
@@ -406,7 +406,7 @@ def _run_all(
 ) -> None:
     """Run a sync against every remote, keep going on failure, summarize."""
     if not cfg.remotes:
-        raise _fail(ConfigError("no remotes configured — run: claude-hop init"))
+        raise _fail(ConfigError("no remotes configured — run: claude-sync init"))
     failures = 0
     table = Table(title=f"{verb} — all remotes")
     table.add_column("Remote")
@@ -659,7 +659,7 @@ def doctor(
     ),
 ) -> None:
     """Check SSH, rsync, config, and local state for problems."""
-    from claude_hop import doctor as doctor_mod
+    from claude_sync import doctor as doctor_mod
 
     try:
         checks = doctor_mod.run_checks(_state["config_path"], _local_home(), remote)
@@ -682,40 +682,6 @@ def doctor(
         console.print(f"[red]✗ {failed} check(s) failed[/red]")
         raise typer.Exit(1)
     console.print("[green]✓ ready to sync[/green]")
-
-
-@app.command()
-def upgrade() -> None:
-    """Upgrade claude-hop to the latest release."""
-    from claude_hop import upgrade as upgrade_mod
-
-    current = get_version()
-    with console.status("checking PyPI for the latest release…"):
-        latest = upgrade_mod.latest_version()
-    if latest is None:
-        console.print("[yellow]⚠[/yellow] could not reach PyPI — attempting the upgrade anyway")
-    elif not upgrade_mod.is_newer(latest, current):
-        console.print(f"[green]✓[/green] already up to date (v{current})")
-        return
-    else:
-        console.print(f"upgrading v{current} → v{latest}")
-
-    cmd = upgrade_mod.detect_upgrade_command()
-    if cmd is None:
-        if upgrade_mod.dev_checkout_root() is not None:
-            raise _fail(SyncError("this is a development checkout — upgrade with git pull"))
-        raise _fail(
-            SyncError(
-                "couldn't tell how claude-hop was installed — upgrade with your installer: "
-                "uv tool upgrade claude-hop | pipx upgrade claude-hop | "
-                "pip install -U claude-hop"
-            )
-        )
-    console.print(f"[dim]$ {' '.join(cmd)}[/dim]")
-    result = subprocess.run(cmd)
-    if result.returncode != 0:
-        raise _fail(SyncError(f"upgrade command failed (exit {result.returncode})"))
-    console.print("[green]✓[/green] done — [bold]claude-hop --version[/bold] to confirm")
 
 
 @remotes_app.callback(invoke_without_command=True)
@@ -753,7 +719,7 @@ def _print_remotes(check: bool) -> None:
         )
     console.print(table)
     if not cfg.remotes:
-        console.print("[yellow]no remotes configured — run claude-hop init[/yellow]")
+        console.print("[yellow]no remotes configured — run claude-sync init[/yellow]")
 
 
 def _probe_remotes(cfg: Config) -> dict[str, str]:

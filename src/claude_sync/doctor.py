@@ -1,4 +1,4 @@
-"""Environment checks for `claude-hop doctor`.
+"""Environment checks for `claude-sync doctor`.
 
 Each check returns ok/warn/fail with a human detail line; the CLI renders
 them and exits non-zero if anything failed. Checks degrade gracefully: a
@@ -16,12 +16,12 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from claude_hop import config as config_mod
-from claude_hop import projects as projects_mod
-from claude_hop import sync
-from claude_hop.config import Config, ConfigError, Remote, resolve_remote
-from claude_hop.remap import PathMapper
-from claude_hop.transport import PROBE_OK, Transport, probe_ssh
+from claude_sync import config as config_mod
+from claude_sync import projects as projects_mod
+from claude_sync import sync
+from claude_sync.config import Config, ConfigError, Remote, resolve_remote
+from claude_sync.remap import PathMapper
+from claude_sync.transport import PROBE_OK, Transport, probe_ssh
 
 OK = "ok"
 WARN = "warn"
@@ -50,7 +50,7 @@ def run_checks(
             # same resolution (and same unknown-name error) as push/pull/diff
             targets = [resolve_remote(cfg, remote_name)]
         elif not cfg.remotes:
-            checks.append(Check("remotes", WARN, "no remotes configured — run: claude-hop init"))
+            checks.append(Check("remotes", WARN, "no remotes configured — run: claude-sync init"))
         else:
             targets = list(cfg.remotes.values())
         many = len(targets) > 1
@@ -216,7 +216,7 @@ def _check_other_stores(
     roots: tuple[str, ...] = ("/home", "/root"),
     euid: int | None = None,
 ) -> None:
-    """Other users' ~/.claude stores on this machine — claude-hop only syncs
+    """Other users' ~/.claude stores on this machine — claude-sync only syncs
     the current user's. The classic trap is running as root on WSL."""
     euid = os.geteuid() if euid is None else euid
     active = (Path(local_home) / ".claude" / "projects").resolve()
@@ -249,7 +249,7 @@ def _check_other_stores(
                 "session stores",
                 WARN,
                 f"running as root: syncing /root/.claude, but another Claude Code "
-                f"session {plural} at {names} — claude-hop only syncs the store "
+                f"session {plural} at {names} — claude-sync only syncs the store "
                 "of the current user",
             )
         )
@@ -258,7 +258,7 @@ def _check_other_stores(
             Check(
                 "session stores",
                 OK,
-                f"another Claude Code session {plural} at {names} — claude-hop "
+                f"another Claude Code session {plural} at {names} — claude-sync "
                 "only syncs the store of the current user",
             )
         )
@@ -305,7 +305,7 @@ def _check_claude_running(checks: list[Check]) -> None:
 
 
 def _check_stale_temp_dirs(checks: list[Check]) -> None:
-    stale = sorted(Path(tempfile.gettempdir()).glob("claude-hop-*"))
+    stale = sorted(Path(tempfile.gettempdir()).glob("claude-sync-*"))
     if stale:
         checks.append(
             Check(

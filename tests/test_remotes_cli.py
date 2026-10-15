@@ -1,11 +1,11 @@
-"""The `claude-hop remotes` command group and init-with-existing-config."""
+"""The `claude-sync remotes` command group and init-with-existing-config."""
 
 import pytest
 from typer.testing import CliRunner
 
-from claude_hop import config as config_mod
-from claude_hop.cli import app
-from claude_hop.config import Config, Remote
+from claude_sync import config as config_mod
+from claude_sync.cli import app
+from claude_sync.config import Config, Remote
 
 runner = CliRunner()
 
@@ -18,8 +18,8 @@ def cfg_env(monkeypatch, tmp_path):
     cfg_path = tmp_path / "config.toml"
     isolated_home = tmp_path / "isolated-home"
     isolated_home.mkdir()
-    monkeypatch.setenv("CLAUDE_HOP_CONFIG", str(cfg_path))
-    monkeypatch.setenv("CLAUDE_HOP_HOME", str(isolated_home))
+    monkeypatch.setenv("CLAUDE_SYNC_CONFIG", str(cfg_path))
+    monkeypatch.setenv("CLAUDE_SYNC_HOME", str(isolated_home))
     monkeypatch.setenv("COLUMNS", "300")
 
     def write(remotes: dict[str, str]):

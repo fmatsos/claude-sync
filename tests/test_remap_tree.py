@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from claude_hop.remap import PathMapper, remap_tree
+from claude_sync.remap import PathMapper, remap_tree
 
 LOCAL = "/home/alice"
 REMOTE = "/Users/alice"

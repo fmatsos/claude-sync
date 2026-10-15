@@ -1,6 +1,6 @@
 import pytest
 
-from claude_hop.remap import PathMapper
+from claude_sync.remap import PathMapper
 
 LOCAL = "/home/alice"
 REMOTE = "/Users/alice"

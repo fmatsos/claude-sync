@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "claude-hop"
+name = "claude-sync"
 version = "0.4.0"
-description = "Sync Claude Code sessions between two machines over SSH — no cloud."
+description = "Sync Claude Code sessions between a laptop and a VM over SSH — derived from claude-hop."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-authors = [{ name = "Vasileios Papadimitriou" }]
+authors = [{ name = "Franck Matsos" }, { name = "Vasileios Papadimitriou" }]
 keywords = ["claude", "claude-code", "sync", "ssh", "rsync"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -28,12 +28,10 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/SeiduTakizawa/Claude-hop"
-Issues = "https://github.com/SeiduTakizawa/Claude-hop/issues"
-Changelog = "https://github.com/SeiduTakizawa/Claude-hop/blob/main/CHANGELOG.md"
+Repository = "https://github.com/fmatsos/claude-sync"
 
 [project.scripts]
-claude-hop = "claude_hop.cli:main"
+claude-sync = "claude_sync.cli:main"
 
 [dependency-groups]
 dev = [
@@ -42,7 +40,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/claude_hop"]
+packages = ["src/claude_sync"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -50,11 +48,10 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
-extend-exclude = ["claude-hop.py"]  # the original prototype, kept for reference
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 # typer's idiom is Option()/Argument() calls in parameter defaults
-"src/claude_hop/cli.py" = ["B008"]
+"src/claude_sync/cli.py" = ["B008"]
