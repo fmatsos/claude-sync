@@ -1,254 +1,133 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/SeiduTakizawa/Claude-hop/main/.github/banner.png"
-       alt="claude-hop — sync Claude Code sessions between machines" width="100%">
-</p>
+# claude-sync
 
-<p align="center">
-  <a href="https://pypi.org/project/claude-hop/"><img src="https://img.shields.io/pypi/v/claude-hop?color=ff8800" alt="PyPI"></a>
-  <a href="https://github.com/SeiduTakizawa/Claude-hop/actions/workflows/ci.yml"><img src="https://github.com/SeiduTakizawa/Claude-hop/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://pypi.org/project/claude-hop/"><img src="https://img.shields.io/pypi/pyversions/claude-hop" alt="Python"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT"></a>
-</p>
+Move [Claude Code](https://claude.com/claude-code) sessions between my laptop and my always-on VM
+over SSH and rsync — no cloud, no accounts.
 
-Start a Claude Code session on your Linux desktop, `claude --resume` it on
-your Mac — or any pair of your machines. claude-hop syncs
-`~/.claude/projects/` over SSH with rsync, rewriting the absolute paths that
-would otherwise make sessions invisible on the other side. No cloud, no
-accounts: your machines, your keys, your sessions.
+Derived from [claude-hop](https://github.com/SeiduTakizawa/Claude-hop) by Vasileios Papadimitriou
+(MIT), which does the hard part: remapping the absolute paths that make sessions invisible on
+another machine. This fork keeps that engine and adds an overwrite mode, a smarter guard for
+sessions that are being written, and drops the upstream distribution machinery (PyPI upgrade,
+install script, demo assets). See [CHANGELOG.md](CHANGELOG.md).
 
-## Quickstart (30 seconds)
+## Install
+
+Private repository, installed from a local checkout:
 
 ```sh
-uv tool install claude-hop        # or: pipx install claude-hop
-claude-hop init                   # asks for the SSH host, detects the rest
-claude-hop push                   # then `claude --resume` on the other machine
+uv tool install --editable ~/src/github.com/fmatsos/claude-sync   # puts `claude-sync` in ~/.local/bin
+claude-sync init        # asks for the SSH host (an alias from ~/.ssh/config works), detects the rest
 ```
 
-No `uv`? One-liner that installs it first:
+Requirements: Python ≥ 3.11 and `rsync` on the machine you run it from; `sshd` and `rsync` on the
+other one (key-based SSH). Nothing needs to be installed on the VM: this machine is the operator,
+remotes only need `sshd` and `rsync`.
+
+## Use
+
+Run it from the laptop. `push` sends the laptop's sessions to the remote, `pull` brings the
+remote's sessions back.
 
 ```sh
-curl -sSL https://raw.githubusercontent.com/SeiduTakizawa/Claude-hop/main/install.sh | bash
+claude-sync push                 # laptop → VM, --diff (default)
+claude-sync pull                 # VM → laptop, --diff
+claude-sync pull --full          # VM → laptop, overwrite every differing file
+claude-sync push . --dry-run     # only the project in the current directory, preview only
+claude-sync diff                 # what would move, in both directions
 ```
 
-Requirements: Python ≥ 3.11 on this machine; `sshd` and `rsync` on the other
-one (key-based SSH auth recommended).
-
-## See it in action
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/SeiduTakizawa/Claude-hop/main/assets/claude-hop.gif"
-       alt="claude-hop demo: init banner, remotes table, the path remap, push" width="800">
-</p>
-<p align="center"><em>Real commands against a sandbox — <a href="demo/demo.tape">scripted with VHS</a>, so it re-renders instead of re-recording.</em></p>
-
-## The problem it solves
-
-Claude Code stores sessions in `~/.claude/projects/`, indexed by the
-**absolute path** of the project with every non-alphanumeric character
-replaced by a dash:
-
-```
-/home/alice/work/webshop   →   ~/.claude/projects/-home-alice-work-webshop/
-```
-
-The absolute paths also appear *inside* the session JSONL files — `cwd`
-fields, file paths in tool calls. Copy the files verbatim from a Linux box
-(`/home/alice`) to a Mac (`/Users/alice`) and `claude --resume` can never
-find them: the directory name encodes the wrong path and the transcript
-still references the wrong filesystem.
-
-claude-hop rewrites **both** during sync — directory names and JSONL
-contents — mapping your home here to your home there (auto-detected at
-`init`), in whichever direction you sync. The rewrite is boundary-aware
-(`/home/al` never matches inside `/home/alice`) and round-trip safe: push
-then pull reproduces your files byte for byte.
-
-## Commands
+Then `claude --resume` on the other machine, from the same project directory.
 
 | Command | What it does |
 |---|---|
-| `claude-hop init` | Interactive setup: SSH host, connection test, remote home auto-detection, rsync checks. With an existing config it offers to add another remote. |
-| `claude-hop status [REMOTE]` | Table of local projects, session counts, and the remapped name each gets on the remote; flags ambiguous mappings. |
-| `claude-hop diff [REMOTE]` | What would sync, in both directions, without writing anything. |
-| `claude-hop push [REMOTE]` | Send local sessions to a remote machine. `--all` pushes to every remote. |
-| `claude-hop pull [REMOTE]` | Fetch a remote's sessions and merge them in. `--all` pulls from every remote. |
-| `claude-hop doctor [REMOTE]` | Environment checks: SSH, rsync versions, config, running Claude Code, stale staging dirs. Checks every remote by default. |
-| `claude-hop remotes` | List configured remotes (`--check` probes them over SSH). |
-| `claude-hop remotes add/remove/rename` | Manage remotes; `add` runs the same wizard as init. |
-| `claude-hop remotes migrate` | Upgrade an old single-remote config to the multi-remote format (backs up the original first). |
-| `claude-hop upgrade` | Upgrade claude-hop itself to the latest release (works for uv, pipx, and pip installs). |
+| `init` | Interactive setup: SSH host, connection test, remote home detection. |
+| `status [REMOTE]` | Local projects and the name each gets on the remote. |
+| `diff [REMOTE]` | What would sync, in both directions, without writing anything. |
+| `push [REMOTE] [PROJECTS]` | Send local sessions to the remote. `--all` pushes to every remote. |
+| `pull [REMOTE] [PROJECTS]` | Fetch the remote's sessions. `--all` pulls from every remote. |
+| `doctor [REMOTE]` | SSH, rsync, config, clock skew, active sessions, stale temp dirs. |
+| `remotes list/add/remove/rename/migrate` | Manage the remotes. |
 
-`push` and `pull` accept `--dry-run` (`-n`), `--yes` (`-y`), `--force`, and `--all`.
+`push` and `pull` accept `--diff` / `--full`, `--dry-run` (`-n`), `--yes` (`-y`), `--force`,
+`--verbose` (`-v`) and `--all`.
 
-**Which remote runs?** An explicit name wins (`claude-hop push mac`); with
-exactly one remote configured the name can be omitted; with several and no
-name, commands refuse and list your options — nothing is picked implicitly.
-The first positional argument counts as a remote only when it exactly
-matches a configured remote name; anything else is a project selector, and
-a near-miss of a remote name is an error with a suggestion rather than a
-silent no-op. If a directory in your cwd shares a remote's name, write
-`./name` to mean the project.
+### `--diff` and `--full`
 
-**Multiple machines are hub-and-spoke.** This machine is the operator;
-remotes only need `sshd` and `rsync`, and remotes never talk to each other.
-To move sessions between two remotes, route through the hub —
-`claude-hop pull mac` then `claude-hop push thinkpad` — the merge semantics
-(newer file wins, never deletes) make that safe in any order.
+- **`--diff` (default)** — copy what is new or changed, and keep a destination file that is newer
+  than the source (`rsync -u`). Safe to run at any time.
+- **`--full`** — overwrite every differing file on the destination with the source version, even
+  when the destination is newer. Every replaced file is first copied to
+  `<home>/.claude/sync-backup/<date>/` **on the receiving machine** (purge it from time to time).
+  The `[sync]` extras (history, agents, skills) always merge, never overwrite.
 
-### Syncing a single project
+Neither mode ever deletes: a session that exists only on the destination stays where it is.
 
-`push`, `pull`, and `diff` take optional project selectors — by default they
-sync everything:
+### Sessions that are being written
 
-```sh
-claude-hop push .                             # just the project you're standing in
-claude-hop pull ~/work/webshop                # one project, by path
-claude-hop push -- -home-alice-work-webshop   # by encoded name, as shown in `status`
-claude-hop diff . ~/work/blog                 # several at once
-```
+Claude Code appends to the session file as it works, so a file written in the last 2 minutes — on
+either machine — is a moving target. Such files are **left out of the transfer and listed**, the
+rest goes through. A busy file that needed no transfer anyway is not mentioned. `--force` includes
+them. `doctor` warns when local sessions are active.
 
-Encoded names start with a dash, so pass them after the standard `--`
-separator — everything after `--` is a selector, never an option.
+This replaces upstream's "refuse while any `claude` process runs" check, which blocked every sync
+on a laptop with Claude Code open and never looked at the other machine (where a Remote Control
+session runs all night).
 
-Selectors are asymmetric on purpose: `push` matches them against your
-*local* projects, while `pull` translates them through the mapping and
-matches against the *remote's* projects — so pulling a project that doesn't
-exist locally yet works.
+## How the remapping works
 
-When a selection is given, only those projects sync and the optional `[sync]`
-extras (history/agents/skills) are skipped.
-
-## Safety model
-
-- **Merge, never clobber.** rsync runs with `-u` (newer file wins) and never
-  with `--delete` — a sync can only add or update sessions, never remove.
-- **Staging, not in-place.** Remapping happens in a temp dir;
-  `~/.claude/projects/` is only ever touched by the merge itself.
-- **Refuses to run alongside Claude Code.** Sessions are flushed to disk on
-  exit, so syncing mid-session would miss your latest work. Override with
-  `--force` if you know what you're doing.
-- **First-pull backup.** The first pull that would merge into existing local
-  sessions offers a tarball backup (`~/.claude/backups/`) before touching
-  anything.
+Claude Code stores sessions in `~/.claude/projects/<encoded-path>/<id>.jsonl`, where the encoded
+path is the project's absolute path with every non-alphanumeric character replaced by `-`. The
+absolute paths also appear inside the JSONL (`cwd`, file paths in tool calls). claude-sync rewrites
+both while syncing, mapping your home here to your home there (detected at `init`). When both
+machines use the same user and the same project paths, the remap is a no-op — the recommended
+setup. Projects outside `$HOME` need a `[mappings]` prefix (`status` flags them).
 
 ## Configuration
 
-`~/.config/claude-hop/config.toml` (written by `init`, `$XDG_CONFIG_HOME`
-honoured). Each machine you sync with is a named `[remotes.<name>]` table:
+`~/.config/claude-sync/config.toml` (written by `init`):
 
 ```toml
-[remotes.mac]
-host = "mac.local"          # SSH alias or hostname; "" = a local directory
-home = "/Users/alice"       # auto-detected at init
+[remotes.vm]
+host = "claude-box"        # SSH alias or hostname; "" = a local directory
+home = "/home/franck"      # auto-detected at init
 
-[remotes.thinkpad]
-host = "192.168.1.50"
-home = "/home/al"
-
-# per-remote mappings: merged over the global [mappings], per-remote wins
-[remotes.mac.mappings]
-"/home/alice/work/webshop" = "/Users/alice/projects/webshop"
-
-[sync]                      # applies to all remotes
-include_history = false     # also sync ~/.claude/history.jsonl (remapped)
-include_agents = false      # also sync ~/.claude/agents/ (verbatim)
-include_skills = false      # also sync ~/.claude/skills/ (verbatim)
+[sync]
+include_history = false    # also ~/.claude/history.jsonl (remapped, always merged)
+include_agents = false
+include_skills = false
 
 [mappings]
-# Global: projects at *different relative paths* on the other machines.
-# Specific mappings win over the generic home remap.
-"/home/alice/work/blog" = "/srv/blog"
+"/home/franck/work/blog" = "/srv/blog"   # only for projects at different paths
 ```
 
-Configs from claude-hop ≤ 0.2.0 (a single `[remote]` table) keep working
-and are read as a remote named `default`; run `claude-hop remotes migrate`
-to upgrade the file in place (the original is backed up first).
+Environment: `CLAUDE_SYNC_CONFIG` (config path), `CLAUDE_SYNC_HOME` (treat a directory as the
+local home — tests and the e2e harness).
 
-`claude-hop status` shows exactly how every project will map; if one looks
-wrong, add it under `[mappings]` (or the remote's own mappings table).
+## Safety model
 
-### WSL / projects outside $HOME
+- Never `--delete`. A sync can only add or update.
+- `~/.claude/projects/` is only touched by the final rsync; remapping happens in a temp dir.
+- `--full` backs up what it replaces; the first `pull` into existing sessions offers a tarball
+  backup in `~/.claude/backups/`.
+- Newer-wins merging relies on clocks: `doctor` warns above 30 s of skew with a remote.
+- Transcripts can contain secrets read by tools. They travel over SSH only; do not put them in a
+  repository or a shared folder.
 
-The generic home remap only helps paths that contain your home. Projects
-elsewhere — the classic case is WSL work under `/mnt/c/...` — need a
-mapping prefix, or their sessions would land on the remote with paths
-`claude --resume` can't find:
+## Limitations
 
-```toml
-[remotes.mac.mappings]
-"/mnt/c/Users/tasos" = "/Users/tasos/win"
-```
-
-You don't have to work this out yourself: `status` flags affected
-projects, `push`/`pull` refuse them with a ready-to-paste snippet
-(computed from the projects' real paths), and `init`/`remotes add` offer
-to add the prefix mapping during setup. `--force` pushes them unchanged
-if you really want that.
-
-## Supported platforms
-
-Any pair of Unix-shaped machines, in either direction: **Linux ↔ macOS**,
-**Linux ↔ Linux**, **macOS ↔ macOS**. The remap isn't tied to `/home` vs
-`/Users` — it maps *your home here* to *your home there*, whatever they are
-(identical homes on both sides work too; the remap just becomes a no-op and
-you keep the merge/safety machinery).
-
-**Windows** is supported **via WSL**: inside WSL you have a real Linux home,
-`rsync`, and `sshd`, so claude-hop works there like on any Linux box — it
-syncs the Claude Code you run *inside* WSL. Native (non-WSL) Windows is not
-supported: Claude Code encodes `C:\` project paths differently and there's
-no native rsync. If you need it, open an issue.
-
-## Limitations worth knowing
-
-- Sessions whose *conversation text* literally mentions the other machine's
-  home path (e.g. a transcript discussing `/Users/alice/...` while on the
-  Linux box) can't be rewritten losslessly — path rewriting is text-level by
-  design, so such mentions get remapped too.
-- Session files that aren't valid UTF-8 are copied verbatim without
-  remapping rather than risk corrupting them.
-- On macOS 15+, the bundled `rsync` is `openrsync`; it works, but if you hit
-  option errors, `brew install rsync`.
-
-## Troubleshooting
-
-- **An update didn't come back after working on the other machine.**
-  Merging is newer-file-wins, so clocks are load-bearing: `claude-hop
-  doctor` warns when a remote's clock is skewed by more than 30 seconds.
-  Run `push`/`pull` with `--verbose` to see any files a merge skipped
-  because the destination copy was newer.
-- **The resumed conversation shows up as a second session.** `claude
-  --resume` continues a synced conversation into a *new* session file, so
-  after syncing back you'll see both the original and the continuation in
-  the picker. That's Claude Code's session model, not a sync bug — both
-  files sync fine.
-- **"host reachable, but key-based auth isn't set up".** Probes never use
-  passwords (they'd hang invisibly), so password-only hosts show this
-  message. Run the suggested `ssh-copy-id user@host` once, or point the
-  config's `host` at an `~/.ssh/config` alias that carries your key.
+- A resumed conversation continues in a *new* session file, so both the original and the
+  continuation exist after syncing back. That is Claude Code's session model.
+- Text-level path rewriting also rewrites a transcript's prose that mentions the other machine's
+  home. Session files that are not valid UTF-8 are copied verbatim.
+- Not covered: file state (use Git), running processes, native Windows (WSL works).
 
 ## Development
 
 ```sh
-uv sync           # install with dev dependencies
-uv run pytest     # unit + integration tests (integration needs rsync)
+uv sync && uv run pytest      # unit + integration tests (rsync needed)
 uv run ruff check .
-make e2e          # full two-container SSH round trip (needs Docker)
+make e2e                      # two-container SSH round trip (Docker)
 ```
-
-The e2e rig (`e2e/`) spins up two containers — one with a Linux-style home,
-one macOS-style — wires SSH key auth between them, and drives the real CLI
-through push, modify-on-the-other-side, and pull.
-
-### Regenerating the demo
-
-The README GIF is scripted, not hand-recorded: `demo/setup.sh` builds a
-self-contained sandbox (fake home, two local-path remotes) and
-`demo/demo.tape` replays real commands against it with
-[VHS](https://github.com/charmbracelet/vhs). When CLI output changes, run
-`make demo` (needs `vhs`, `ttyd`, `ffmpeg`) and commit the refreshed
-`assets/claude-hop.gif`.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. Copyright (c) 2026 Vasileios Papadimitriou (claude-hop) and Franck Matsos.

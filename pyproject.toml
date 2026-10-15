@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-sync"
-version = "0.4.0"
+version = "0.5.0"
 description = "Sync Claude Code sessions between a laptop and a VM over SSH — derived from claude-hop."
 readme = "README.md"
 requires-python = ">=3.11"

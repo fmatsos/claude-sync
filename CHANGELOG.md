@@ -1,10 +1,35 @@
 # Changelog
 
-All notable changes to claude-hop are documented here. The format follows
+All notable changes to claude-sync (and, before 0.5.0, to claude-hop) are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-10-15
+
+First release of the claude-sync fork of claude-hop 0.4.0 (history kept, entries below are
+claude-hop's).
+
+### Added
+
+- `push` / `pull --full`: overwrite every differing file on the destination instead of keeping
+  the newer one. Replaced files are copied to `~/.claude/sync-backup/<date>/` on the receiving
+  machine. `--diff` (the default) names the previous behaviour. The `[sync]` extras always merge.
+
+### Changed
+
+- Renamed to claude-sync: package `claude_sync`, command `claude-sync`, config in
+  `~/.config/claude-sync/`, env vars `CLAUDE_SYNC_CONFIG` / `CLAUDE_SYNC_HOME`.
+- The "refuse while Claude Code runs" check is replaced by a recency guard on both machines:
+  session files written in the last 2 minutes are left out of the transfer and listed;
+  `--force` includes them. `doctor` reports active local sessions instead of a running process.
+
+### Removed
+
+- `upgrade` command, `install.sh`, the PyPI release workflow, the prototype script, the demo
+  assets and the ASCII banner (they pointed at the upstream project's distribution).
+- macOS from the CI matrix.
 
 ## [0.4.0] - 2026-07-07
 
